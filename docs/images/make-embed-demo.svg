@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="760" viewBox="0 0 1200 760" role="img" aria-label="make embed demo">
+  <defs>
+    <linearGradient id="bg" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0%" stop-color="#1f2937"/>
+      <stop offset="100%" stop-color="#111827"/>
+    </linearGradient>
+    <linearGradient id="card" x1="0" x2="0" y1="0" y2="1">
+      <stop offset="0%" stop-color="#1b2536"/>
+      <stop offset="100%" stop-color="#141c2b"/>
+    </linearGradient>
+  </defs>
+  <rect width="1200" height="760" fill="url(#bg)"/>
+  <rect x="120" y="70" width="960" height="620" rx="18" fill="url(#card)" stroke="#334155" stroke-width="2"/>
+  <rect x="145" y="95" width="6" height="570" fill="#22c55e"/>
+  <text x="170" y="130" fill="#f8fafc" font-size="34" font-family="Arial, sans-serif" font-weight="700">Team Balancer</text>
+
+  <text x="170" y="185" fill="#93c5fd" font-size="24" font-family="Arial, sans-serif" font-weight="700">Alpha</text>
+  <text x="170" y="220" fill="#e5e7eb" font-size="22" font-family="Arial, sans-serif">• PlayerA (2450)</text>
+  <text x="170" y="252" fill="#e5e7eb" font-size="22" font-family="Arial, sans-serif">• PlayerD (2320)</text>
+  <text x="170" y="284" fill="#e5e7eb" font-size="22" font-family="Arial, sans-serif">• PlayerF (2240)</text>
+  <text x="170" y="316" fill="#e5e7eb" font-size="22" font-family="Arial, sans-serif">• PlayerH (2110)</text>
+
+  <text x="610" y="185" fill="#fca5a5" font-size="24" font-family="Arial, sans-serif" font-weight="700">Bravo</text>
+  <text x="610" y="220" fill="#e5e7eb" font-size="22" font-family="Arial, sans-serif">• PlayerB (2400)</text>
+  <text x="610" y="252" fill="#e5e7eb" font-size="22" font-family="Arial, sans-serif">• PlayerC (2360)</text>
+  <text x="610" y="284" fill="#e5e7eb" font-size="22" font-family="Arial, sans-serif">• PlayerE (2280)</text>
+  <text x="610" y="316" fill="#e5e7eb" font-size="22" font-family="Arial, sans-serif">• PlayerG (2080)</text>
+
+  <text x="170" y="390" fill="#fcd34d" font-size="24" font-family="Arial, sans-serif" font-weight="700">Spectators</text>
+  <text x="170" y="425" fill="#e5e7eb" font-size="22" font-family="Arial, sans-serif">• PlayerI (2000)</text>
+  <text x="170" y="457" fill="#e5e7eb" font-size="22" font-family="Arial, sans-serif">• PlayerJ (1950)</text>
+
+  <text x="610" y="390" fill="#86efac" font-size="24" font-family="Arial, sans-serif" font-weight="700">Summary</text>
+  <text x="610" y="425" fill="#e5e7eb" font-size="22" font-family="Arial, sans-serif">SumA: 9120</text>
+  <text x="610" y="457" fill="#e5e7eb" font-size="22" font-family="Arial, sans-serif">SumB: 9120</text>
+  <text x="610" y="489" fill="#e5e7eb" font-size="22" font-family="Arial, sans-serif">Diff: 0</text>
+
+  <text x="170" y="640" fill="#94a3b8" font-size="18" font-family="Arial, sans-serif">Demo image of /make embed output</text>
+</svg>
