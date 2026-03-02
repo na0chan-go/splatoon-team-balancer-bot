@@ -100,6 +100,50 @@ func TestBuildMatch_ErrorsWhenPlayersMoreThan10(t *testing.T) {
 	}
 }
 
+func TestBuildMatch_BoundaryPlayers8To10(t *testing.T) {
+	tests := []struct {
+		name           string
+		powers         []int
+		wantSpectators int
+		wantTeamSize   int
+	}{
+		{
+			name:           "8 players",
+			powers:         []int{2500, 2450, 2400, 2350, 2300, 2250, 2200, 2150},
+			wantSpectators: 0,
+			wantTeamSize:   4,
+		},
+		{
+			name:           "9 players",
+			powers:         []int{2550, 2500, 2450, 2400, 2350, 2300, 2250, 2200, 2150},
+			wantSpectators: 1,
+			wantTeamSize:   4,
+		},
+		{
+			name:           "10 players",
+			powers:         []int{2600, 2550, 2500, 2450, 2400, 2350, 2300, 2250, 2200, 2150},
+			wantSpectators: 2,
+			wantTeamSize:   4,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			players := makePlayers(tt.powers)
+			got, err := BuildMatch(players, 7)
+			if err != nil {
+				t.Fatalf("BuildMatch returned error: %v", err)
+			}
+			if len(got.TeamA) != tt.wantTeamSize || len(got.TeamB) != tt.wantTeamSize {
+				t.Fatalf("expected TeamA/TeamB to be %d/%d, got %d/%d", tt.wantTeamSize, tt.wantTeamSize, len(got.TeamA), len(got.TeamB))
+			}
+			if len(got.Spectators) != tt.wantSpectators {
+				t.Fatalf("expected spectators=%d, got %d", tt.wantSpectators, len(got.Spectators))
+			}
+		})
+	}
+}
+
 func makePlayers(powers []int) []Player {
 	players := make([]Player, 0, len(powers))
 	for i, p := range powers {
