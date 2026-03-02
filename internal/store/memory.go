@@ -4,6 +4,7 @@ import (
 	"errors"
 	"sort"
 	"sync"
+	"time"
 
 	"github.com/na0chan-go/splatoon-team-balancer-bot/internal/domain"
 )
@@ -25,6 +26,12 @@ type RoomState struct {
 	LastResult          domain.MatchResult
 	LastSeed            int64
 	LastPlayersSnapshot []domain.Player
+	SpectatorHistory    map[string]SpectatorHistory
+}
+
+type SpectatorHistory struct {
+	SpectatorCount  int   `json:"spectator_count"`
+	LastSpectatedAt int64 `json:"last_spectated_at"`
 }
 
 type MemoryStore struct {
@@ -102,6 +109,16 @@ func (s *MemoryStore) SaveLastMatch(guildID, channelID string, seed int64, playe
 	state.LastSeed = seed
 	state.LastPlayersSnapshot = copyPlayers(players)
 	state.LastResult = copyResult(result)
+	if state.SpectatorHistory == nil {
+		state.SpectatorHistory = make(map[string]SpectatorHistory)
+	}
+	now := time.Now().Unix()
+	for _, spectator := range result.Spectators {
+		h := state.SpectatorHistory[spectator.ID]
+		h.SpectatorCount++
+		h.LastSpectatedAt = now
+		state.SpectatorHistory[spectator.ID] = h
+	}
 	s.rooms[key] = state
 }
 
@@ -127,6 +144,7 @@ func (s *MemoryStore) GetState(guildID, channelID string) (RoomState, bool) {
 		LastResult:          copyResult(state.LastResult),
 		LastSeed:            state.LastSeed,
 		LastPlayersSnapshot: copyPlayers(state.LastPlayersSnapshot),
+		SpectatorHistory:    copySpectatorHistory(state.SpectatorHistory),
 	}, true
 }
 
@@ -169,6 +187,17 @@ func copyResult(result domain.MatchResult) domain.MatchResult {
 		SumB:       result.SumB,
 		Diff:       result.Diff,
 	}
+}
+
+func copySpectatorHistory(in map[string]SpectatorHistory) map[string]SpectatorHistory {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string]SpectatorHistory, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
 }
 
 func roomKey(guildID, channelID string) string {

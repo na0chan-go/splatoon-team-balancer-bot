@@ -36,6 +36,16 @@ type matchCandidate struct {
 
 // BuildMatch creates a 4v4 match from 8-10 players by exhaustive search.
 func BuildMatch(players []Player, seed int64) (MatchResult, error) {
+	return buildMatch(players, seed, 0, nil)
+}
+
+// BuildMatchWithSpectatorPenalty creates a match with spectator-rotation preference.
+// Team balance (Diff) is still primary, and rotation is applied within diffSlack range.
+func BuildMatchWithSpectatorPenalty(players []Player, seed int64, diffSlack int, penaltyFn func([]Player) int) (MatchResult, error) {
+	return buildMatch(players, seed, diffSlack, penaltyFn)
+}
+
+func buildMatch(players []Player, seed int64, diffSlack int, penaltyFn func([]Player) int) (MatchResult, error) {
 	if len(players) < 8 {
 		return MatchResult{}, ErrNotEnoughPlayers
 	}
@@ -51,18 +61,129 @@ func BuildMatch(players []Player, seed int64) (MatchResult, error) {
 		poolCandidates, poolBestDiff := bestSplitsForPool(pool, players)
 		if poolBestDiff < bestDiff {
 			bestDiff = poolBestDiff
-			candidates = poolCandidates
-			continue
 		}
-		if poolBestDiff == bestDiff {
-			candidates = append(candidates, poolCandidates...)
-		}
+		candidates = append(candidates, poolCandidates...)
 	}
 
+	candidates = selectCandidatesByBalanceAndPenalty(players, candidates, bestDiff, diffSlack, penaltyFn)
 	r := rand.New(rand.NewSource(seed))
 	chosen := candidates[r.Intn(len(candidates))]
 
 	return buildResult(players, chosen), nil
+}
+
+func selectCandidatesByBalanceAndPenalty(
+	players []Player,
+	candidates []matchCandidate,
+	bestDiff int,
+	diffSlack int,
+	penaltyFn func([]Player) int,
+) []matchCandidate {
+	if penaltyFn == nil || diffSlack <= 0 {
+		return filterByDiff(candidates, bestDiff)
+	}
+
+	limit := bestDiff + diffSlack
+	eligible := make([]matchCandidate, 0, len(candidates))
+	for _, c := range candidates {
+		if c.diff <= limit {
+			eligible = append(eligible, c)
+		}
+	}
+	if len(eligible) == 0 {
+		return filterByDiff(candidates, bestDiff)
+	}
+
+	bestPenalty := math.MaxInt
+	penaltyByKey := make(map[string]int, len(eligible))
+	for _, c := range eligible {
+		spectators := spectatorsForCandidate(players, c)
+		penalty := penaltyFn(spectators)
+		key := candidateKey(c)
+		penaltyByKey[key] = penalty
+		if penalty < bestPenalty {
+			bestPenalty = penalty
+		}
+	}
+
+	penalized := make([]matchCandidate, 0, len(eligible))
+	minDiff := math.MaxInt
+	for _, c := range eligible {
+		if penaltyByKey[candidateKey(c)] != bestPenalty {
+			continue
+		}
+		if c.diff < minDiff {
+			minDiff = c.diff
+			penalized = penalized[:0]
+			penalized = append(penalized, c)
+			continue
+		}
+		if c.diff == minDiff {
+			penalized = append(penalized, c)
+		}
+	}
+	if len(penalized) > 0 {
+		return penalized
+	}
+	return filterByDiff(candidates, bestDiff)
+}
+
+func filterByDiff(candidates []matchCandidate, diff int) []matchCandidate {
+	filtered := make([]matchCandidate, 0, len(candidates))
+	for _, c := range candidates {
+		if c.diff == diff {
+			filtered = append(filtered, c)
+		}
+	}
+	return filtered
+}
+
+func spectatorsForCandidate(players []Player, c matchCandidate) []Player {
+	inMatch := make(map[int]bool, 8)
+	for _, idx := range c.teamAIdx {
+		inMatch[idx] = true
+	}
+	for _, idx := range c.teamBIdx {
+		inMatch[idx] = true
+	}
+
+	spectators := make([]Player, 0, len(players)-8)
+	for idx, p := range players {
+		if !inMatch[idx] {
+			spectators = append(spectators, p)
+		}
+	}
+	return spectators
+}
+
+func candidateKey(c matchCandidate) string {
+	// Candidate uniqueness is determined by team indices.
+	return intsKey(c.teamAIdx) + "|" + intsKey(c.teamBIdx)
+}
+
+func intsKey(indices []int) string {
+	key := ""
+	for i, idx := range indices {
+		if i > 0 {
+			key += ","
+		}
+		key += itoa(idx)
+	}
+	return key
+}
+
+func itoa(n int) string {
+	if n == 0 {
+		return "0"
+	}
+	buf := [20]byte{}
+	i := len(buf)
+	for n > 0 {
+		i--
+		buf[i] = byte('0' + (n % 10))
+		n /= 10
+	}
+	return string(buf[i:])
 }
 
 func bestSplitsForPool(pool []int, players []Player) ([]matchCandidate, int) {

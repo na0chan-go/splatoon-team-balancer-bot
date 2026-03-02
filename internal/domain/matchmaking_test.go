@@ -144,6 +144,31 @@ func TestBuildMatch_BoundaryPlayers8To10(t *testing.T) {
 	}
 }
 
+func TestBuildMatchWithSpectatorPenalty_PrefersLowerPenaltyOnTie(t *testing.T) {
+	players := makePlayers([]int{2000, 2000, 2000, 2000, 2000, 2000, 2000, 2000, 2000})
+
+	penaltyFn := func(spectators []Player) int {
+		// Heavily penalize p1 as spectator; all other spectators are preferred.
+		for _, sp := range spectators {
+			if sp.ID == "p1" {
+				return 1000
+			}
+		}
+		return 0
+	}
+
+	got, err := BuildMatchWithSpectatorPenalty(players, 1, 50, penaltyFn)
+	if err != nil {
+		t.Fatalf("BuildMatchWithSpectatorPenalty returned error: %v", err)
+	}
+	if len(got.Spectators) != 1 {
+		t.Fatalf("expected 1 spectator, got %d", len(got.Spectators))
+	}
+	if got.Spectators[0].ID == "p1" {
+		t.Fatalf("expected spectator to avoid p1 due to penalty, got %+v", got.Spectators[0])
+	}
+}
+
 func makePlayers(powers []int) []Player {
 	players := make([]Player, 0, len(powers))
 	for i, p := range powers {

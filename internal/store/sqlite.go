@@ -8,7 +8,9 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"sync"
+	"time"
 
 	"github.com/na0chan-go/splatoon-team-balancer-bot/internal/domain"
 	_ "modernc.org/sqlite"
@@ -134,6 +136,16 @@ func (s *SQLiteStore) SaveLastMatch(guildID, channelID string, seed int64, playe
 	state.LastSeed = seed
 	state.LastPlayersSnapshot = copyPlayers(players)
 	state.LastResult = copyResult(result)
+	if state.SpectatorHistory == nil {
+		state.SpectatorHistory = make(map[string]SpectatorHistory)
+	}
+	now := time.Now().Unix()
+	for _, spectator := range result.Spectators {
+		h := state.SpectatorHistory[spectator.ID]
+		h.SpectatorCount++
+		h.LastSpectatedAt = now
+		state.SpectatorHistory[spectator.ID] = h
+	}
 	_ = s.upsertStateLocked(guildID, channelID, state)
 }
 
@@ -151,6 +163,7 @@ func (s *SQLiteStore) GetState(guildID, channelID string) (RoomState, bool) {
 		LastResult:          copyResult(state.LastResult),
 		LastSeed:            state.LastSeed,
 		LastPlayersSnapshot: copyPlayers(state.LastPlayersSnapshot),
+		SpectatorHistory:    copySpectatorHistory(state.SpectatorHistory),
 	}, true
 }
 
@@ -173,11 +186,16 @@ CREATE TABLE IF NOT EXISTS room_states (
   last_result_json TEXT NOT NULL,
   last_seed INTEGER NOT NULL,
   last_players_snapshot_json TEXT NOT NULL,
+  spectator_history_json TEXT NOT NULL DEFAULT '{}',
   PRIMARY KEY (guild_id, channel_id)
 );`
 
 	if _, err := s.db.Exec(schema); err != nil {
 		return fmt.Errorf("failed to initialize sqlite schema: %w", err)
+	}
+	_, err := s.db.Exec(`ALTER TABLE room_states ADD COLUMN spectator_history_json TEXT NOT NULL DEFAULT '{}'`)
+	if err != nil && !strings.Contains(strings.ToLower(err.Error()), "duplicate column name") {
+		return fmt.Errorf("failed to migrate sqlite schema: %w", err)
 	}
 	return nil
 }
@@ -187,12 +205,13 @@ func (s *SQLiteStore) getRoomStateLocked(guildID, channelID string) (RoomState, 
 	var lastResultJSON string
 	var lastSeed int64
 	var lastPlayersSnapshotJSON string
+	var spectatorHistoryJSON string
 
 	err := s.db.QueryRow(
-		`SELECT players_json, last_result_json, last_seed, last_players_snapshot_json
+		`SELECT players_json, last_result_json, last_seed, last_players_snapshot_json, spectator_history_json
 		 FROM room_states WHERE guild_id = ? AND channel_id = ?`,
 		guildID, channelID,
-	).Scan(&playersJSON, &lastResultJSON, &lastSeed, &lastPlayersSnapshotJSON)
+	).Scan(&playersJSON, &lastResultJSON, &lastSeed, &lastPlayersSnapshotJSON, &spectatorHistoryJSON)
 	if errors.Is(err, sql.ErrNoRows) {
 		return RoomState{}, false, nil
 	}
@@ -209,6 +228,9 @@ func (s *SQLiteStore) getRoomStateLocked(guildID, channelID string) (RoomState, 
 	}
 	if err := json.Unmarshal([]byte(lastPlayersSnapshotJSON), &state.LastPlayersSnapshot); err != nil {
 		return RoomState{}, false, fmt.Errorf("failed to unmarshal last players snapshot: %w", err)
+	}
+	if err := json.Unmarshal([]byte(spectatorHistoryJSON), &state.SpectatorHistory); err != nil {
+		return RoomState{}, false, fmt.Errorf("failed to unmarshal spectator history: %w", err)
 	}
 	state.LastSeed = lastSeed
 
@@ -228,22 +250,28 @@ func (s *SQLiteStore) upsertStateLocked(guildID, channelID string, state RoomSta
 	if err != nil {
 		return fmt.Errorf("failed to marshal last players snapshot: %w", err)
 	}
+	spectatorHistoryJSON, err := json.Marshal(state.SpectatorHistory)
+	if err != nil {
+		return fmt.Errorf("failed to marshal spectator history: %w", err)
+	}
 
 	_, err = s.db.Exec(
 		`INSERT INTO room_states
-		  (guild_id, channel_id, players_json, last_result_json, last_seed, last_players_snapshot_json)
-		 VALUES (?, ?, ?, ?, ?, ?)
+		  (guild_id, channel_id, players_json, last_result_json, last_seed, last_players_snapshot_json, spectator_history_json)
+		 VALUES (?, ?, ?, ?, ?, ?, ?)
 		 ON CONFLICT(guild_id, channel_id) DO UPDATE SET
 		   players_json = excluded.players_json,
 		   last_result_json = excluded.last_result_json,
 		   last_seed = excluded.last_seed,
-		   last_players_snapshot_json = excluded.last_players_snapshot_json`,
+		   last_players_snapshot_json = excluded.last_players_snapshot_json,
+		   spectator_history_json = excluded.spectator_history_json`,
 		guildID,
 		channelID,
 		string(playersJSON),
 		string(lastResultJSON),
 		state.LastSeed,
 		string(lastPlayersSnapshotJSON),
+		string(spectatorHistoryJSON),
 	)
 	if err != nil {
 		return err

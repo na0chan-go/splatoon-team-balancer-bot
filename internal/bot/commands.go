@@ -16,6 +16,8 @@ var roomStore store.Store = store.NewMemoryStore()
 
 var ErrNoLastMake = errors.New("no previous make result")
 
+const rotationDiffSlack = 50
+
 func SetStore(s store.Store) {
 	if s == nil {
 		return
@@ -291,7 +293,10 @@ func displayName(ic *discordgo.InteractionCreate) string {
 }
 
 func runMatchAndStore(guildID, channelID string, players []domain.Player, seed int64) (domain.MatchResult, error) {
-	result, err := domain.BuildMatch(players, seed)
+	state, _ := roomStore.GetState(guildID, channelID)
+	penaltyFn := spectatorPenaltyFunc(state.SpectatorHistory, time.Now().Unix())
+
+	result, err := domain.BuildMatchWithSpectatorPenalty(players, seed, rotationDiffSlack, penaltyFn)
 	if err != nil {
 		return domain.MatchResult{}, err
 	}
@@ -313,4 +318,33 @@ func hasResetPermission(ic *discordgo.InteractionCreate) bool {
 	}
 	perms := ic.Member.Permissions
 	return perms&discordgo.PermissionAdministrator != 0 || perms&discordgo.PermissionManageServer != 0
+}
+
+func spectatorPenaltyFunc(history map[string]store.SpectatorHistory, nowUnix int64) func([]domain.Player) int {
+	return func(spectators []domain.Player) int {
+		if len(history) == 0 || len(spectators) == 0 {
+			return 0
+		}
+
+		penalty := 0
+		for _, p := range spectators {
+			h := history[p.ID]
+			penalty += h.SpectatorCount * 100
+
+			if h.LastSpectatedAt <= 0 {
+				continue
+			}
+
+			age := nowUnix - h.LastSpectatedAt
+			switch {
+			case age < 3600:
+				penalty += 300
+			case age < 6*3600:
+				penalty += 150
+			case age < 24*3600:
+				penalty += 60
+			}
+		}
+		return penalty
+	}
 }

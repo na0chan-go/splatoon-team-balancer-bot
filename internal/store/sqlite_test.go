@@ -26,6 +26,7 @@ func TestSQLiteStorePersistsRoomState(t *testing.T) {
 		{ID: "u6", Name: "p6", XPower: 2000},
 		{ID: "u7", Name: "p7", XPower: 1900},
 		{ID: "u8", Name: "p8", XPower: 1800},
+		{ID: "u9", Name: "p9", XPower: 1700},
 	}
 	for _, p := range players {
 		if _, err := s.Join("g1", "c1", p); err != nil {
@@ -35,7 +36,7 @@ func TestSQLiteStorePersistsRoomState(t *testing.T) {
 	result := domain.MatchResult{
 		TeamA:      players[:4],
 		TeamB:      players[4:8],
-		Spectators: nil,
+		Spectators: []domain.Player{players[8]},
 		SumA:       9400,
 		SumB:       7800,
 		Diff:       1600,
@@ -52,7 +53,7 @@ func TestSQLiteStorePersistsRoomState(t *testing.T) {
 	defer s2.Close()
 
 	list := s2.List("g1", "c1")
-	if got, want := len(list), 8; got != want {
+	if got, want := len(list), 9; got != want {
 		t.Fatalf("unexpected persisted list size: got %d want %d", got, want)
 	}
 	state, ok := s2.GetState("g1", "c1")
@@ -67,6 +68,12 @@ func TestSQLiteStorePersistsRoomState(t *testing.T) {
 	}
 	if !reflect.DeepEqual(state.LastResult, result) {
 		t.Fatalf("unexpected LastResult: %+v", state.LastResult)
+	}
+	if got := state.SpectatorHistory["u9"].SpectatorCount; got != 1 {
+		t.Fatalf("expected spectator count of u9 to be 1, got %d", got)
+	}
+	if got := state.SpectatorHistory["u9"].LastSpectatedAt; got == 0 {
+		t.Fatal("expected LastSpectatedAt to be set")
 	}
 }
 
