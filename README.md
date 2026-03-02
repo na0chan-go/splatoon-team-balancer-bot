@@ -140,13 +140,25 @@ Go
 
 GitHubから取得
 
-環境変数にDiscordトークンを設定
+必要な環境変数を設定
 
+- `DISCORD_TOKEN`: Bot token（`Bot ` プレフィックスは不要）
+- `DISCORD_APP_ID`: Discord Application ID
+- `DISCORD_GUILD_ID`: コマンドを登録するテスト用Guild ID（guild commandとして即時反映）
+
+```bash
 export DISCORD_TOKEN=your_token
+export DISCORD_APP_ID=123456789012345678
+export DISCORD_GUILD_ID=123456789012345678
+```
 
 Botを起動
 
+```bash
 go run cmd/bot/main.go
+```
+
+起動後、指定Guildで `/ping` を実行すると `pong` が返ります。
 
 ---
 
