@@ -167,3 +167,38 @@ func TestMemoryStoreResetRoomClearsState(t *testing.T) {
 		t.Fatal("expected room state to be removed after reset")
 	}
 }
+
+func TestMemoryStoreRecordMatchResultUpdatesStatsAndClamp(t *testing.T) {
+	s := NewMemoryStore()
+	result := domain.MatchResult{
+		TeamA: []domain.Player{
+			{ID: "u1", Name: "p1", XPower: 2400},
+			{ID: "u2", Name: "p2", XPower: 2300},
+			{ID: "u3", Name: "p3", XPower: 2200},
+			{ID: "u4", Name: "p4", XPower: 2100},
+		},
+		TeamB: []domain.Player{
+			{ID: "u5", Name: "p5", XPower: 2400},
+			{ID: "u6", Name: "p6", XPower: 2300},
+			{ID: "u7", Name: "p7", XPower: 2200},
+			{ID: "u8", Name: "p8", XPower: 2100},
+		},
+	}
+
+	for i := 0; i < 30; i++ {
+		if err := s.RecordMatchResult("g1", "c1", "alpha", result); err != nil {
+			t.Fatalf("RecordMatchResult failed: %v", err)
+		}
+	}
+
+	stats := s.GetPlayerStats([]string{"u1", "u5"})
+	if got := stats["u1"].Rating; got != 200 {
+		t.Fatalf("expected winner rating clamped to 200, got %d", got)
+	}
+	if got := stats["u5"].Rating; got != -200 {
+		t.Fatalf("expected loser rating clamped to -200, got %d", got)
+	}
+	if stats["u1"].Wins == 0 || stats["u5"].Losses == 0 {
+		t.Fatalf("expected wins/losses to be updated: %+v", stats)
+	}
+}

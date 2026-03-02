@@ -35,13 +35,15 @@ type SpectatorHistory struct {
 }
 
 type MemoryStore struct {
-	mu    sync.RWMutex
-	rooms map[string]RoomState
+	mu          sync.RWMutex
+	rooms       map[string]RoomState
+	playerStats map[string]PlayerStat
 }
 
 func NewMemoryStore() *MemoryStore {
 	return &MemoryStore{
-		rooms: make(map[string]RoomState),
+		rooms:       make(map[string]RoomState),
+		playerStats: make(map[string]PlayerStat),
 	}
 }
 
@@ -169,6 +171,56 @@ func (s *MemoryStore) List(guildID, channelID string) []domain.Player {
 	return players
 }
 
+func (s *MemoryStore) GetPlayerStats(userIDs []string) map[string]PlayerStat {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	stats := make(map[string]PlayerStat, len(userIDs))
+	for _, userID := range userIDs {
+		st, ok := s.playerStats[userID]
+		if !ok {
+			stats[userID] = PlayerStat{UserID: userID}
+			continue
+		}
+		stats[userID] = st
+	}
+	return stats
+}
+
+func (s *MemoryStore) RecordMatchResult(guildID, channelID, winnerTeam string, result domain.MatchResult) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	var winners []domain.Player
+	var losers []domain.Player
+	switch winnerTeam {
+	case "alpha":
+		winners = result.TeamA
+		losers = result.TeamB
+	case "bravo":
+		winners = result.TeamB
+		losers = result.TeamA
+	default:
+		return errors.New("winner team must be alpha or bravo")
+	}
+
+	for _, p := range winners {
+		st := s.playerStats[p.ID]
+		st.UserID = p.ID
+		st.Wins++
+		st.Rating = clampRating(st.Rating + 10)
+		s.playerStats[p.ID] = st
+	}
+	for _, p := range losers {
+		st := s.playerStats[p.ID]
+		st.UserID = p.ID
+		st.Losses++
+		st.Rating = clampRating(st.Rating - 10)
+		s.playerStats[p.ID] = st
+	}
+	return nil
+}
+
 func copyPlayers(players []domain.Player) []domain.Player {
 	if len(players) == 0 {
 		return nil
@@ -202,4 +254,15 @@ func copySpectatorHistory(in map[string]SpectatorHistory) map[string]SpectatorHi
 
 func roomKey(guildID, channelID string) string {
 	return guildID + ":" + channelID
+}
+
+func clampRating(r int) int {
+	switch {
+	case r < -200:
+		return -200
+	case r > 200:
+		return 200
+	default:
+		return r
+	}
 }

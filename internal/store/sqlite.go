@@ -178,7 +178,7 @@ func (s *SQLiteStore) ResetRoom(guildID, channelID string) {
 }
 
 func (s *SQLiteStore) init() error {
-	const schema = `
+	const roomStateSchema = `
 CREATE TABLE IF NOT EXISTS room_states (
   guild_id TEXT NOT NULL,
   channel_id TEXT NOT NULL,
@@ -190,13 +190,43 @@ CREATE TABLE IF NOT EXISTS room_states (
   PRIMARY KEY (guild_id, channel_id)
 );`
 
-	if _, err := s.db.Exec(schema); err != nil {
+	if _, err := s.db.Exec(roomStateSchema); err != nil {
 		return fmt.Errorf("failed to initialize sqlite schema: %w", err)
 	}
 	_, err := s.db.Exec(`ALTER TABLE room_states ADD COLUMN spectator_history_json TEXT NOT NULL DEFAULT '{}'`)
 	if err != nil && !strings.Contains(strings.ToLower(err.Error()), "duplicate column name") {
 		return fmt.Errorf("failed to migrate sqlite schema: %w", err)
 	}
+
+	const playerStatsSchema = `
+CREATE TABLE IF NOT EXISTS player_stats (
+  user_id TEXT PRIMARY KEY,
+  rating INTEGER NOT NULL DEFAULT 0,
+  wins INTEGER NOT NULL DEFAULT 0,
+  losses INTEGER NOT NULL DEFAULT 0
+);`
+	if _, err := s.db.Exec(playerStatsSchema); err != nil {
+		return fmt.Errorf("failed to initialize player_stats schema: %w", err)
+	}
+
+	const matchesSchema = `
+CREATE TABLE IF NOT EXISTS matches (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  guild_id TEXT NOT NULL,
+  channel_id TEXT NOT NULL,
+  winner_team TEXT NOT NULL,
+  team_a_json TEXT NOT NULL,
+  team_b_json TEXT NOT NULL,
+  spectators_json TEXT NOT NULL,
+  sum_a INTEGER NOT NULL,
+  sum_b INTEGER NOT NULL,
+  diff INTEGER NOT NULL,
+  created_at INTEGER NOT NULL
+);`
+	if _, err := s.db.Exec(matchesSchema); err != nil {
+		return fmt.Errorf("failed to initialize matches schema: %w", err)
+	}
+
 	return nil
 }
 
@@ -286,4 +316,152 @@ func sortPlayers(players []domain.Player) {
 		}
 		return players[i].XPower > players[j].XPower
 	})
+}
+
+func (s *SQLiteStore) GetPlayerStats(userIDs []string) map[string]PlayerStat {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	stats := make(map[string]PlayerStat, len(userIDs))
+	for _, userID := range userIDs {
+		stats[userID] = PlayerStat{UserID: userID}
+	}
+	if len(userIDs) == 0 {
+		return stats
+	}
+
+	query, args := inClause("user_id", userIDs)
+	rows, err := s.db.Query(
+		fmt.Sprintf(`SELECT user_id, rating, wins, losses FROM player_stats WHERE %s`, query),
+		args...,
+	)
+	if err != nil {
+		return stats
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var st PlayerStat
+		if err := rows.Scan(&st.UserID, &st.Rating, &st.Wins, &st.Losses); err != nil {
+			continue
+		}
+		st.Rating = clampRating(st.Rating)
+		stats[st.UserID] = st
+	}
+	return stats
+}
+
+func (s *SQLiteStore) RecordMatchResult(guildID, channelID, winnerTeam string, result domain.MatchResult) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	var winners []domain.Player
+	var losers []domain.Player
+	switch winnerTeam {
+	case "alpha":
+		winners = result.TeamA
+		losers = result.TeamB
+	case "bravo":
+		winners = result.TeamB
+		losers = result.TeamA
+	default:
+		return errors.New("winner team must be alpha or bravo")
+	}
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	for _, p := range winners {
+		if err := updatePlayerStat(tx, p.ID, true); err != nil {
+			return err
+		}
+	}
+	for _, p := range losers {
+		if err := updatePlayerStat(tx, p.ID, false); err != nil {
+			return err
+		}
+	}
+
+	teamAJSON, err := json.Marshal(result.TeamA)
+	if err != nil {
+		return err
+	}
+	teamBJSON, err := json.Marshal(result.TeamB)
+	if err != nil {
+		return err
+	}
+	spectatorsJSON, err := json.Marshal(result.Spectators)
+	if err != nil {
+		return err
+	}
+
+	if _, err := tx.Exec(
+		`INSERT INTO matches
+		   (guild_id, channel_id, winner_team, team_a_json, team_b_json, spectators_json, sum_a, sum_b, diff, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		guildID,
+		channelID,
+		winnerTeam,
+		string(teamAJSON),
+		string(teamBJSON),
+		string(spectatorsJSON),
+		result.SumA,
+		result.SumB,
+		result.Diff,
+		time.Now().Unix(),
+	); err != nil {
+		return err
+	}
+
+	return tx.Commit()
+}
+
+func inClause(column string, values []string) (string, []any) {
+	parts := make([]string, 0, len(values))
+	args := make([]any, 0, len(values))
+	for _, v := range values {
+		parts = append(parts, column+" = ?")
+		args = append(args, v)
+	}
+	return strings.Join(parts, " OR "), args
+}
+
+func updatePlayerStat(tx *sql.Tx, userID string, won bool) error {
+	var rating, wins, losses int
+	err := tx.QueryRow(
+		`SELECT rating, wins, losses FROM player_stats WHERE user_id = ?`,
+		userID,
+	).Scan(&rating, &wins, &losses)
+	if errors.Is(err, sql.ErrNoRows) {
+		rating = 0
+		wins = 0
+		losses = 0
+	} else if err != nil {
+		return err
+	}
+
+	if won {
+		wins++
+		rating = clampRating(rating + 10)
+	} else {
+		losses++
+		rating = clampRating(rating - 10)
+	}
+
+	_, err = tx.Exec(
+		`INSERT INTO player_stats (user_id, rating, wins, losses)
+		 VALUES (?, ?, ?, ?)
+		 ON CONFLICT(user_id) DO UPDATE SET
+		   rating = excluded.rating,
+		   wins = excluded.wins,
+		   losses = excluded.losses`,
+		userID,
+		rating,
+		wins,
+		losses,
+	)
+	return err
 }

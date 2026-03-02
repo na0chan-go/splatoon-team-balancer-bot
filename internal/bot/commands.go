@@ -62,6 +62,22 @@ var commands = []*discordgo.ApplicationCommand{
 		Name:        "reset",
 		Description: "reset current room state",
 	},
+	{
+		Name:        "result",
+		Description: "record match winner and update ratings",
+		Options: []*discordgo.ApplicationCommandOption{
+			{
+				Type:        discordgo.ApplicationCommandOptionString,
+				Name:        "winner",
+				Description: "winner team",
+				Required:    true,
+				Choices: []*discordgo.ApplicationCommandOptionChoice{
+					{Name: "alpha", Value: "alpha"},
+					{Name: "bravo", Value: "bravo"},
+				},
+			},
+		},
+	},
 }
 
 func RegisterGuildCommands(s *discordgo.Session, appID, guildID string) error {
@@ -93,6 +109,8 @@ func HandleInteraction(s *discordgo.Session, ic *discordgo.InteractionCreate) {
 		handleReroll(s, ic)
 	case "reset":
 		handleReset(s, ic)
+	case "result":
+		handleResult(s, ic)
 	}
 }
 
@@ -225,6 +243,32 @@ func handleReset(s *discordgo.Session, ic *discordgo.InteractionCreate) {
 	respond(s, ic, "部屋の状態をリセットしました。", false)
 }
 
+func handleResult(s *discordgo.Session, ic *discordgo.InteractionCreate) {
+	if ic.GuildID == "" {
+		respond(s, ic, "このコマンドはサーバー内で実行してください。", true)
+		return
+	}
+
+	winner, ok := stringOption(ic.ApplicationCommandData().Options, "winner")
+	if !ok || (winner != "alpha" && winner != "bravo") {
+		respond(s, ic, "winner は alpha か bravo を指定してください。", true)
+		return
+	}
+
+	state, ok := roomStore.GetState(ic.GuildID, ic.ChannelID)
+	if !ok || len(state.LastResult.TeamA) == 0 || len(state.LastResult.TeamB) == 0 {
+		respond(s, ic, "先に /make を実行してください。", true)
+		return
+	}
+
+	if err := roomStore.RecordMatchResult(ic.GuildID, ic.ChannelID, winner, state.LastResult); err != nil {
+		respond(s, ic, "結果の記録に失敗しました。", true)
+		return
+	}
+
+	respond(s, ic, fmt.Sprintf("試合結果を記録しました。勝利: %s", winner), false)
+}
+
 func respond(s *discordgo.Session, ic *discordgo.InteractionCreate, content string, ephemeral bool) {
 	data := &discordgo.InteractionResponseData{
 		Content: content,
@@ -261,6 +305,16 @@ func intOption(opts []*discordgo.ApplicationCommandInteractionDataOption, name s
 	return 0, false
 }
 
+func stringOption(opts []*discordgo.ApplicationCommandInteractionDataOption, name string) (string, bool) {
+	for _, opt := range opts {
+		if opt.Name != name {
+			continue
+		}
+		return opt.StringValue(), true
+	}
+	return "", false
+}
+
 func interactionUser(ic *discordgo.InteractionCreate) *discordgo.User {
 	if ic.Member != nil && ic.Member.User != nil {
 		return ic.Member.User
@@ -295,8 +349,9 @@ func displayName(ic *discordgo.InteractionCreate) string {
 func runMatchAndStore(guildID, channelID string, players []domain.Player, seed int64) (domain.MatchResult, error) {
 	state, _ := roomStore.GetState(guildID, channelID)
 	penaltyFn := spectatorPenaltyFunc(state.SpectatorHistory, time.Now().Unix())
+	effectivePlayers := applyRatings(players, roomStore.GetPlayerStats(playerIDs(players)))
 
-	result, err := domain.BuildMatchWithSpectatorPenalty(players, seed, rotationDiffSlack, penaltyFn)
+	result, err := domain.BuildMatchWithSpectatorPenalty(effectivePlayers, seed, rotationDiffSlack, penaltyFn)
 	if err != nil {
 		return domain.MatchResult{}, err
 	}
@@ -347,4 +402,29 @@ func spectatorPenaltyFunc(history map[string]store.SpectatorHistory, nowUnix int
 		}
 		return penalty
 	}
+}
+
+func playerIDs(players []domain.Player) []string {
+	ids := make([]string, 0, len(players))
+	for _, p := range players {
+		ids = append(ids, p.ID)
+	}
+	return ids
+}
+
+func applyRatings(players []domain.Player, stats map[string]store.PlayerStat) []domain.Player {
+	effective := make([]domain.Player, len(players))
+	for i, p := range players {
+		st := stats[p.ID]
+		rating := st.Rating
+		if rating < -200 {
+			rating = -200
+		}
+		if rating > 200 {
+			rating = 200
+		}
+		p.XPower += rating
+		effective[i] = p
+	}
+	return effective
 }

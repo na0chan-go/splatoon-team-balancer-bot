@@ -138,3 +138,47 @@ func TestSQLiteStoreJoinRejectsOver10Players(t *testing.T) {
 		t.Fatalf("expected ErrRoomFull, got %v", err)
 	}
 }
+
+func TestSQLiteStoreRecordMatchResultUpdatesStatsAndHistory(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+	s, err := NewSQLiteStore(dbPath)
+	if err != nil {
+		t.Fatalf("NewSQLiteStore failed: %v", err)
+	}
+	defer s.Close()
+
+	result := domain.MatchResult{
+		TeamA: []domain.Player{
+			{ID: "u1", Name: "p1", XPower: 2400},
+			{ID: "u2", Name: "p2", XPower: 2300},
+			{ID: "u3", Name: "p3", XPower: 2200},
+			{ID: "u4", Name: "p4", XPower: 2100},
+		},
+		TeamB: []domain.Player{
+			{ID: "u5", Name: "p5", XPower: 2400},
+			{ID: "u6", Name: "p6", XPower: 2300},
+			{ID: "u7", Name: "p7", XPower: 2200},
+			{ID: "u8", Name: "p8", XPower: 2100},
+		},
+	}
+
+	if err := s.RecordMatchResult("g1", "c1", "alpha", result); err != nil {
+		t.Fatalf("RecordMatchResult failed: %v", err)
+	}
+
+	stats := s.GetPlayerStats([]string{"u1", "u5"})
+	if got := stats["u1"].Rating; got != 10 {
+		t.Fatalf("expected winner rating 10, got %d", got)
+	}
+	if got := stats["u5"].Rating; got != -10 {
+		t.Fatalf("expected loser rating -10, got %d", got)
+	}
+
+	var matchCount int
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM matches`).Scan(&matchCount); err != nil {
+		t.Fatalf("failed to count matches: %v", err)
+	}
+	if matchCount != 1 {
+		t.Fatalf("expected 1 match record, got %d", matchCount)
+	}
+}

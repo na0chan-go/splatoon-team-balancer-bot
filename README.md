@@ -31,6 +31,8 @@ Splatoon3 のプライベートマッチでチーム分けを自動化する Dis
 - 全探索アルゴリズムによる最適解保証
 - 同条件で再計算可能（reroll）
 - 観戦ローテーション（spectator_count / last_spectated_at を利用）
+- match history tracking（/result で勝敗を保存）
+- dynamic power adjustment（declared_xpower + rating でマッチング）
 
 ---
 
@@ -219,6 +221,9 @@ docker run --rm \
 
 /reroll
 別の最適解を再計算
+
+/result <alpha|bravo>
+試合結果を記録してratingを更新
 
 /reset
 部屋を初期化
