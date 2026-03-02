@@ -17,5 +17,10 @@ jobs:
       - name: gofmt
         run: test -z "$(gofmt -l .)"
 
+      - name: staticcheck
+        run: |
+          go install honnef.co/go/tools/cmd/staticcheck@latest
+          staticcheck ./...
+
       - name: go test
         run: go test ./... -race
