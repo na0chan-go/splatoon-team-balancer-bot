@@ -9,6 +9,7 @@ import (
 	"github.com/bwmarrin/discordgo"
 	"github.com/na0chan-go/splatoon-team-balancer-bot/internal/domain"
 	"github.com/na0chan-go/splatoon-team-balancer-bot/internal/store"
+	"github.com/na0chan-go/splatoon-team-balancer-bot/internal/util"
 )
 
 var roomStore = store.NewMemoryStore()
@@ -173,7 +174,7 @@ func handleMake(s *discordgo.Session, ic *discordgo.InteractionCreate) {
 		return
 	}
 
-	respond(s, ic, formatMatchResult(result), false)
+	respondEmbed(s, ic, util.MatchResultEmbed(result), false)
 }
 
 func handleReroll(s *discordgo.Session, ic *discordgo.InteractionCreate) {
@@ -192,12 +193,25 @@ func handleReroll(s *discordgo.Session, ic *discordgo.InteractionCreate) {
 		return
 	}
 
-	respond(s, ic, formatMatchResult(result), false)
+	respondEmbed(s, ic, util.MatchResultEmbed(result), false)
 }
 
 func respond(s *discordgo.Session, ic *discordgo.InteractionCreate, content string, ephemeral bool) {
 	data := &discordgo.InteractionResponseData{
 		Content: content,
+	}
+	if ephemeral {
+		data.Flags = discordgo.MessageFlagsEphemeral
+	}
+	_ = s.InteractionRespond(ic.Interaction, &discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseChannelMessageWithSource,
+		Data: data,
+	})
+}
+
+func respondEmbed(s *discordgo.Session, ic *discordgo.InteractionCreate, embed *discordgo.MessageEmbed, ephemeral bool) {
+	data := &discordgo.InteractionResponseData{
+		Embeds: []*discordgo.MessageEmbed{embed},
 	}
 	if ephemeral {
 		data.Flags = discordgo.MessageFlagsEphemeral
@@ -247,29 +261,6 @@ func displayName(ic *discordgo.InteractionCreate) string {
 		return ic.User.Username
 	}
 	return "unknown"
-}
-
-func formatMatchResult(result domain.MatchResult) string {
-	var b strings.Builder
-	fmt.Fprintf(&b, "Team A (合計: %d)\n", result.SumA)
-	for _, p := range result.TeamA {
-		fmt.Fprintf(&b, "- %s (<@%s>) : %d\n", p.Name, p.ID, p.XPower)
-	}
-
-	fmt.Fprintf(&b, "\nTeam B (合計: %d)\n", result.SumB)
-	for _, p := range result.TeamB {
-		fmt.Fprintf(&b, "- %s (<@%s>) : %d\n", p.Name, p.ID, p.XPower)
-	}
-
-	if len(result.Spectators) > 0 {
-		b.WriteString("\nSpectators\n")
-		for _, p := range result.Spectators {
-			fmt.Fprintf(&b, "- %s (<@%s>) : %d\n", p.Name, p.ID, p.XPower)
-		}
-	}
-
-	fmt.Fprintf(&b, "\nDiff: %d", result.Diff)
-	return strings.TrimSpace(b.String())
 }
 
 func runMatchAndStore(guildID, channelID string, players []domain.Player, seed int64) (domain.MatchResult, error) {
