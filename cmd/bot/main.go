@@ -9,22 +9,24 @@ import (
 
 	"github.com/bwmarrin/discordgo"
 	"github.com/na0chan-go/splatoon-team-balancer-bot/internal/bot"
+	"github.com/na0chan-go/splatoon-team-balancer-bot/internal/config"
 	"github.com/na0chan-go/splatoon-team-balancer-bot/internal/store"
 )
 
 func main() {
-	token := mustGetenv("DISCORD_TOKEN")
-	appID := mustGetenv("DISCORD_APP_ID")
-	guildID := mustGetenv("DISCORD_GUILD_ID")
-	sqlitePath := getenvOrDefault("SQLITE_PATH", "./data.db")
+	cfg, err := config.Load()
+	if err != nil {
+		log.Fatalf("failed to load config: %v", err)
+	}
 
-	persistentStore, err := store.NewSQLiteStore(sqlitePath)
+	persistentStore, err := store.NewSQLiteStore(cfg.SQLitePath)
 	if err != nil {
 		log.Fatalf("failed to initialize sqlite store: %v", err)
 	}
 	defer persistentStore.Close()
 	bot.SetStore(persistentStore)
 
+	token := cfg.DiscordToken
 	if !strings.HasPrefix(token, "Bot ") {
 		token = "Bot " + token
 	}
@@ -42,7 +44,7 @@ func main() {
 	}
 	defer session.Close()
 
-	if err := bot.RegisterGuildCommands(session, appID, guildID); err != nil {
+	if err := bot.RegisterGuildCommands(session, cfg.DiscordAppID, cfg.DiscordGuildID); err != nil {
 		log.Fatalf("failed to register commands: %v", err)
 	}
 
@@ -51,20 +53,4 @@ func main() {
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
 	<-stop
-}
-
-func mustGetenv(key string) string {
-	value := os.Getenv(key)
-	if value == "" {
-		log.Fatalf("%s is required", key)
-	}
-	return value
-}
-
-func getenvOrDefault(key, fallback string) string {
-	value := os.Getenv(key)
-	if value == "" {
-		return fallback
-	}
-	return value
 }
