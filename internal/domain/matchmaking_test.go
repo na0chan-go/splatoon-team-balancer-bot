@@ -60,6 +60,30 @@ func TestBuildMatch_DeterministicWithSameSeed(t *testing.T) {
 	}
 }
 
+func TestBuildMatch_ErrorsWhenPlayersLessThan8(t *testing.T) {
+	players := makePlayers([]int{2500, 2450, 2400, 2350, 2300, 2250, 2200})
+
+	_, err := BuildMatch(players, 1)
+	if err == nil {
+		t.Fatal("expected error for less than 8 players, got nil")
+	}
+	if err != ErrNotEnoughPlayers {
+		t.Fatalf("expected ErrNotEnoughPlayers, got %v", err)
+	}
+}
+
+func TestBuildMatch_ErrorsWhenPlayersMoreThan10(t *testing.T) {
+	players := makePlayers([]int{2600, 2550, 2500, 2450, 2400, 2350, 2300, 2250, 2200, 2150, 2100})
+
+	_, err := BuildMatch(players, 1)
+	if err == nil {
+		t.Fatal("expected error for more than 10 players, got nil")
+	}
+	if err != ErrTooManyPlayers {
+		t.Fatalf("expected ErrTooManyPlayers, got %v", err)
+	}
+}
+
 func makePlayers(powers []int) []Player {
 	players := make([]Player, 0, len(powers))
 	for i, p := range powers {

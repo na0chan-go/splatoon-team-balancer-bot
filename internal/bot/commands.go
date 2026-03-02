@@ -4,6 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/bwmarrin/discordgo"
 	"github.com/na0chan-go/splatoon-team-balancer-bot/internal/domain"
@@ -11,6 +13,15 @@ import (
 )
 
 var roomStore = store.NewMemoryStore()
+
+type makeSnapshot struct {
+	players []domain.Player
+}
+
+var (
+	makeMu        sync.Mutex
+	lastMakeState = make(map[string]makeSnapshot)
+)
 
 var commands = []*discordgo.ApplicationCommand{
 	{
@@ -37,6 +48,10 @@ var commands = []*discordgo.ApplicationCommand{
 		Name:        "list",
 		Description: "show participants of current room",
 	},
+	{
+		Name:        "make",
+		Description: "create balanced 4v4 teams from participants",
+	},
 }
 
 func RegisterGuildCommands(s *discordgo.Session, appID, guildID string) error {
@@ -62,6 +77,8 @@ func HandleInteraction(s *discordgo.Session, ic *discordgo.InteractionCreate) {
 		handleLeave(s, ic)
 	case "list":
 		handleList(s, ic)
+	case "make":
+		handleMake(s, ic)
 	}
 }
 
@@ -137,6 +154,30 @@ func handleList(s *discordgo.Session, ic *discordgo.InteractionCreate) {
 	respond(s, ic, strings.TrimSpace(b.String()), false)
 }
 
+func handleMake(s *discordgo.Session, ic *discordgo.InteractionCreate) {
+	if ic.GuildID == "" {
+		respond(s, ic, "このコマンドはサーバー内で実行してください。", true)
+		return
+	}
+
+	players := roomStore.List(ic.GuildID, ic.ChannelID)
+	result, err := domain.BuildMatch(players, time.Now().UnixNano())
+	if errors.Is(err, domain.ErrNotEnoughPlayers) {
+		respond(s, ic, "参加者が8人未満のためチーム分けできません。", true)
+		return
+	}
+	if err != nil {
+		respond(s, ic, "チーム分けに失敗しました。", true)
+		return
+	}
+
+	makeMu.Lock()
+	lastMakeState[roomID(ic.GuildID, ic.ChannelID)] = makeSnapshot{players: copyPlayers(players)}
+	makeMu.Unlock()
+
+	respond(s, ic, formatMatchResult(result), false)
+}
+
 func respond(s *discordgo.Session, ic *discordgo.InteractionCreate, content string, ephemeral bool) {
 	data := &discordgo.InteractionResponseData{
 		Content: content,
@@ -189,4 +230,37 @@ func displayName(ic *discordgo.InteractionCreate) string {
 		return ic.User.Username
 	}
 	return "unknown"
+}
+
+func formatMatchResult(result domain.MatchResult) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "Team A (合計: %d)\n", result.SumA)
+	for _, p := range result.TeamA {
+		fmt.Fprintf(&b, "- %s (<@%s>) : %d\n", p.Name, p.ID, p.XPower)
+	}
+
+	fmt.Fprintf(&b, "\nTeam B (合計: %d)\n", result.SumB)
+	for _, p := range result.TeamB {
+		fmt.Fprintf(&b, "- %s (<@%s>) : %d\n", p.Name, p.ID, p.XPower)
+	}
+
+	if len(result.Spectators) > 0 {
+		b.WriteString("\nSpectators\n")
+		for _, p := range result.Spectators {
+			fmt.Fprintf(&b, "- %s (<@%s>) : %d\n", p.Name, p.ID, p.XPower)
+		}
+	}
+
+	fmt.Fprintf(&b, "\nDiff: %d", result.Diff)
+	return strings.TrimSpace(b.String())
+}
+
+func roomID(guildID, channelID string) string {
+	return guildID + ":" + channelID
+}
+
+func copyPlayers(players []domain.Player) []domain.Player {
+	cp := make([]domain.Player, len(players))
+	copy(cp, players)
+	return cp
 }
