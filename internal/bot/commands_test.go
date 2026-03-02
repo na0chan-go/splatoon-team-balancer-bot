@@ -67,7 +67,7 @@ func TestHasResetPermission(t *testing.T) {
 
 	manageInteraction := &discordgo.InteractionCreate{
 		Interaction: &discordgo.Interaction{
-			Member: &discordgo.Member{Permissions: discordgo.PermissionManageServer},
+			Member: &discordgo.Member{Permissions: discordgo.PermissionManageGuild},
 		},
 	}
 	if !hasResetPermission(manageInteraction) {

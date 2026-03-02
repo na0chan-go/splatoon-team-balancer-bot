@@ -317,7 +317,7 @@ func hasResetPermission(ic *discordgo.InteractionCreate) bool {
 		return false
 	}
 	perms := ic.Member.Permissions
-	return perms&discordgo.PermissionAdministrator != 0 || perms&discordgo.PermissionManageServer != 0
+	return perms&discordgo.PermissionAdministrator != 0 || perms&discordgo.PermissionManageGuild != 0
 }
 
 func spectatorPenaltyFunc(history map[string]store.SpectatorHistory, nowUnix int64) func([]domain.Player) int {
