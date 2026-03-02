@@ -264,4 +264,4 @@ Splatoonのプライベートマッチでは、
 
 # ライセンス
 
-MIT
+[MIT](./LICENSE)
