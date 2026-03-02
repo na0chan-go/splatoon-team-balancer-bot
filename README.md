@@ -164,6 +164,33 @@ go run cmd/bot/main.go
 
 ---
 
+# Docker起動
+
+イメージをビルド
+
+```bash
+docker build -t splatoon-team-balancer-bot .
+```
+
+コンテナを起動
+
+```bash
+docker run --rm \
+  -e DISCORD_TOKEN=your_token \
+  -e DISCORD_APP_ID=123456789012345678 \
+  -e DISCORD_GUILD_ID=123456789012345678 \
+  -e SQLITE_PATH=/app/data.db \
+  -v "$(pwd)/data:/app" \
+  splatoon-team-balancer-bot
+```
+
+補足
+
+- 実行バイナリはコンテナ内 `/app/bot`
+- `SQLITE_PATH` 未指定時は `./data.db`（= `/app/data.db`）
+
+---
+
 # コマンド一覧
 
 /join <xpower>
