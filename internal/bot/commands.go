@@ -12,9 +12,16 @@ import (
 	"github.com/na0chan-go/splatoon-team-balancer-bot/internal/util"
 )
 
-var roomStore = store.NewMemoryStore()
+var roomStore store.Store = store.NewMemoryStore()
 
 var ErrNoLastMake = errors.New("no previous make result")
+
+func SetStore(s store.Store) {
+	if s == nil {
+		return
+	}
+	roomStore = s
+}
 
 var commands = []*discordgo.ApplicationCommand{
 	{

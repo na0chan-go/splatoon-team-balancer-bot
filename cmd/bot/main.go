@@ -9,12 +9,21 @@ import (
 
 	"github.com/bwmarrin/discordgo"
 	"github.com/na0chan-go/splatoon-team-balancer-bot/internal/bot"
+	"github.com/na0chan-go/splatoon-team-balancer-bot/internal/store"
 )
 
 func main() {
 	token := mustGetenv("DISCORD_TOKEN")
 	appID := mustGetenv("DISCORD_APP_ID")
 	guildID := mustGetenv("DISCORD_GUILD_ID")
+	sqlitePath := getenvOrDefault("SQLITE_PATH", "./data.db")
+
+	persistentStore, err := store.NewSQLiteStore(sqlitePath)
+	if err != nil {
+		log.Fatalf("failed to initialize sqlite store: %v", err)
+	}
+	defer persistentStore.Close()
+	bot.SetStore(persistentStore)
 
 	if !strings.HasPrefix(token, "Bot ") {
 		token = "Bot " + token
@@ -48,6 +57,14 @@ func mustGetenv(key string) string {
 	value := os.Getenv(key)
 	if value == "" {
 		log.Fatalf("%s is required", key)
+	}
+	return value
+}
+
+func getenvOrDefault(key, fallback string) string {
+	value := os.Getenv(key)
+	if value == "" {
+		return fallback
 	}
 	return value
 }

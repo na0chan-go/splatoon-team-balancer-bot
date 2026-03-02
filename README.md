@@ -145,11 +145,13 @@ GitHubから取得
 - `DISCORD_TOKEN`: Bot token（`Bot ` プレフィックスは不要）
 - `DISCORD_APP_ID`: Discord Application ID
 - `DISCORD_GUILD_ID`: コマンドを登録するテスト用Guild ID（guild commandとして即時反映）
+- `SQLITE_PATH`: SQLite DBファイルパス（省略時 `./data.db`）
 
 ```bash
 export DISCORD_TOKEN=your_token
 export DISCORD_APP_ID=123456789012345678
 export DISCORD_GUILD_ID=123456789012345678
+export SQLITE_PATH=./data.db
 ```
 
 Botを起動
