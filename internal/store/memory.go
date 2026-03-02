@@ -105,6 +105,13 @@ func (s *MemoryStore) SaveLastMatch(guildID, channelID string, seed int64, playe
 	s.rooms[key] = state
 }
 
+func (s *MemoryStore) ResetRoom(guildID, channelID string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	delete(s.rooms, roomKey(guildID, channelID))
+}
+
 func (s *MemoryStore) GetState(guildID, channelID string) (RoomState, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()

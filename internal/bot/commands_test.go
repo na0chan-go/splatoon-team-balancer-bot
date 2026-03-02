@@ -4,6 +4,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/bwmarrin/discordgo"
 	"github.com/na0chan-go/splatoon-team-balancer-bot/internal/domain"
 	"github.com/na0chan-go/splatoon-team-balancer-bot/internal/store"
 )
@@ -51,5 +52,34 @@ func TestRunMatchAndStoreSavesStateForReroll(t *testing.T) {
 	state, _ = roomStore.GetState("g1", "c1")
 	if state.LastSeed != 200 {
 		t.Fatalf("expected LastSeed=200 after reroll, got %d", state.LastSeed)
+	}
+}
+
+func TestHasResetPermission(t *testing.T) {
+	adminInteraction := &discordgo.InteractionCreate{
+		Interaction: &discordgo.Interaction{
+			Member: &discordgo.Member{Permissions: discordgo.PermissionAdministrator},
+		},
+	}
+	if !hasResetPermission(adminInteraction) {
+		t.Fatal("expected administrator to have reset permission")
+	}
+
+	manageInteraction := &discordgo.InteractionCreate{
+		Interaction: &discordgo.Interaction{
+			Member: &discordgo.Member{Permissions: discordgo.PermissionManageServer},
+		},
+	}
+	if !hasResetPermission(manageInteraction) {
+		t.Fatal("expected manage server permission to have reset permission")
+	}
+
+	normalInteraction := &discordgo.InteractionCreate{
+		Interaction: &discordgo.Interaction{
+			Member: &discordgo.Member{Permissions: discordgo.PermissionViewChannel},
+		},
+	}
+	if hasResetPermission(normalInteraction) {
+		t.Fatal("expected normal member to not have reset permission")
 	}
 }

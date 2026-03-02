@@ -49,6 +49,10 @@ var commands = []*discordgo.ApplicationCommand{
 		Name:        "reroll",
 		Description: "reroll teams using last /make participant snapshot",
 	},
+	{
+		Name:        "reset",
+		Description: "reset current room state",
+	},
 }
 
 func RegisterGuildCommands(s *discordgo.Session, appID, guildID string) error {
@@ -78,6 +82,8 @@ func HandleInteraction(s *discordgo.Session, ic *discordgo.InteractionCreate) {
 		handleMake(s, ic)
 	case "reroll":
 		handleReroll(s, ic)
+	case "reset":
+		handleReset(s, ic)
 	}
 }
 
@@ -196,6 +202,20 @@ func handleReroll(s *discordgo.Session, ic *discordgo.InteractionCreate) {
 	respondEmbed(s, ic, util.MatchResultEmbed(result), false)
 }
 
+func handleReset(s *discordgo.Session, ic *discordgo.InteractionCreate) {
+	if ic.GuildID == "" {
+		respond(s, ic, "このコマンドはサーバー内で実行してください。", true)
+		return
+	}
+	if !hasResetPermission(ic) {
+		respond(s, ic, "権限がありません", true)
+		return
+	}
+
+	roomStore.ResetRoom(ic.GuildID, ic.ChannelID)
+	respond(s, ic, "部屋の状態をリセットしました。", false)
+}
+
 func respond(s *discordgo.Session, ic *discordgo.InteractionCreate, content string, ephemeral bool) {
 	data := &discordgo.InteractionResponseData{
 		Content: content,
@@ -278,4 +298,12 @@ func rerollFromLastSnapshot(guildID, channelID string, seed int64) (domain.Match
 		return domain.MatchResult{}, ErrNoLastMake
 	}
 	return runMatchAndStore(guildID, channelID, state.LastPlayersSnapshot, seed)
+}
+
+func hasResetPermission(ic *discordgo.InteractionCreate) bool {
+	if ic.Member == nil {
+		return false
+	}
+	perms := ic.Member.Permissions
+	return perms&discordgo.PermissionAdministrator != 0 || perms&discordgo.PermissionManageServer != 0
 }

@@ -131,3 +131,32 @@ func TestMemoryStoreSaveAndGetLastMatchState(t *testing.T) {
 		t.Fatalf("unexpected LastResult: %+v", state.LastResult)
 	}
 }
+
+func TestMemoryStoreResetRoomClearsState(t *testing.T) {
+	s := NewMemoryStore()
+	players := []domain.Player{
+		{ID: "u1", Name: "p1", XPower: 2500},
+		{ID: "u2", Name: "p2", XPower: 2400},
+		{ID: "u3", Name: "p3", XPower: 2300},
+		{ID: "u4", Name: "p4", XPower: 2200},
+		{ID: "u5", Name: "p5", XPower: 2100},
+		{ID: "u6", Name: "p6", XPower: 2000},
+		{ID: "u7", Name: "p7", XPower: 1900},
+		{ID: "u8", Name: "p8", XPower: 1800},
+	}
+	for _, p := range players {
+		if _, err := s.Join("g1", "c1", p); err != nil {
+			t.Fatalf("join failed: %v", err)
+		}
+	}
+	s.SaveLastMatch("g1", "c1", 1, players, domain.MatchResult{SumA: 1, SumB: 2, Diff: 1})
+
+	s.ResetRoom("g1", "c1")
+
+	if got := s.List("g1", "c1"); len(got) != 0 {
+		t.Fatalf("expected empty players after reset, got %+v", got)
+	}
+	if _, ok := s.GetState("g1", "c1"); ok {
+		t.Fatal("expected room state to be removed after reset")
+	}
+}
