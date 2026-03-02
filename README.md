@@ -1,3 +1,5 @@
+![CI](https://github.com/na0chan-go/splatoon-team-balancer-bot/actions/workflows/ci.yml/badge.svg)
+
 # Splatoon3 プライベートマッチ チーム分けBot
 
 Splatoon3 のプライベートマッチでチーム分けを自動化する Discord Bot です。

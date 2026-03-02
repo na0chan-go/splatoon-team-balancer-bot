@@ -1,0 +1,22 @@
+# Binaries
+bin/
+*.exe
+*.out
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+
+# Env
+.env
+
+# Test / coverage
+coverage.out
+
+# Local DB
+*.db
+*.sqlite
+*.sqlite3
