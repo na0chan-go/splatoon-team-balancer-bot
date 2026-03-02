@@ -3,6 +3,7 @@ package store
 import (
 	"errors"
 	"fmt"
+	"reflect"
 	"testing"
 
 	"github.com/na0chan-go/splatoon-team-balancer-bot/internal/domain"
@@ -94,5 +95,39 @@ func TestMemoryStoreJoinRejectsOutOfRangeXPower(t *testing.T) {
 	_, err = s.Join("g1", "c1", domain.Player{ID: "u2", Name: "p2", XPower: 5001})
 	if !errors.Is(err, ErrInvalidXPower) {
 		t.Fatalf("expected ErrInvalidXPower for 5001, got %v", err)
+	}
+}
+
+func TestMemoryStoreSaveAndGetLastMatchState(t *testing.T) {
+	s := NewMemoryStore()
+	players := []domain.Player{
+		{ID: "u1", Name: "p1", XPower: 2500},
+		{ID: "u2", Name: "p2", XPower: 2400},
+		{ID: "u3", Name: "p3", XPower: 2300},
+		{ID: "u4", Name: "p4", XPower: 2200},
+		{ID: "u5", Name: "p5", XPower: 2100},
+		{ID: "u6", Name: "p6", XPower: 2000},
+		{ID: "u7", Name: "p7", XPower: 1900},
+		{ID: "u8", Name: "p8", XPower: 1800},
+	}
+	result := domain.MatchResult{
+		TeamA: players[:4], TeamB: players[4:8],
+		SumA: 9400, SumB: 7800, Diff: 1600,
+	}
+
+	s.SaveLastMatch("g1", "c1", 42, players, result)
+
+	state, ok := s.GetState("g1", "c1")
+	if !ok {
+		t.Fatal("expected state to exist")
+	}
+	if state.LastSeed != 42 {
+		t.Fatalf("expected LastSeed=42, got %d", state.LastSeed)
+	}
+	if !reflect.DeepEqual(state.LastPlayersSnapshot, players) {
+		t.Fatalf("unexpected LastPlayersSnapshot: %+v", state.LastPlayersSnapshot)
+	}
+	if !reflect.DeepEqual(state.LastResult, result) {
+		t.Fatalf("unexpected LastResult: %+v", state.LastResult)
 	}
 }

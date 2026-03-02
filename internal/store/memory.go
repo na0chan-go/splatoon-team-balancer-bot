@@ -21,7 +21,10 @@ const (
 )
 
 type RoomState struct {
-	Players []domain.Player
+	Players             []domain.Player
+	LastResult          domain.MatchResult
+	LastSeed            int64
+	LastPlayersSnapshot []domain.Player
 }
 
 type MemoryStore struct {
@@ -90,6 +93,36 @@ func (s *MemoryStore) Leave(guildID, channelID, userID string) error {
 	return nil
 }
 
+func (s *MemoryStore) SaveLastMatch(guildID, channelID string, seed int64, players []domain.Player, result domain.MatchResult) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	key := roomKey(guildID, channelID)
+	state := s.rooms[key]
+	state.LastSeed = seed
+	state.LastPlayersSnapshot = copyPlayers(players)
+	state.LastResult = copyResult(result)
+	s.rooms[key] = state
+}
+
+func (s *MemoryStore) GetState(guildID, channelID string) (RoomState, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	key := roomKey(guildID, channelID)
+	state, ok := s.rooms[key]
+	if !ok {
+		return RoomState{}, false
+	}
+
+	return RoomState{
+		Players:             copyPlayers(state.Players),
+		LastResult:          copyResult(state.LastResult),
+		LastSeed:            state.LastSeed,
+		LastPlayersSnapshot: copyPlayers(state.LastPlayersSnapshot),
+	}, true
+}
+
 func (s *MemoryStore) List(guildID, channelID string) []domain.Player {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -109,6 +142,26 @@ func (s *MemoryStore) List(guildID, channelID string) []domain.Player {
 		return players[i].XPower > players[j].XPower
 	})
 	return players
+}
+
+func copyPlayers(players []domain.Player) []domain.Player {
+	if len(players) == 0 {
+		return nil
+	}
+	cp := make([]domain.Player, len(players))
+	copy(cp, players)
+	return cp
+}
+
+func copyResult(result domain.MatchResult) domain.MatchResult {
+	return domain.MatchResult{
+		TeamA:      copyPlayers(result.TeamA),
+		TeamB:      copyPlayers(result.TeamB),
+		Spectators: copyPlayers(result.Spectators),
+		SumA:       result.SumA,
+		SumB:       result.SumB,
+		Diff:       result.Diff,
+	}
 }
 
 func roomKey(guildID, channelID string) string {

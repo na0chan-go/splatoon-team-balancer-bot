@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/bwmarrin/discordgo"
@@ -14,14 +13,7 @@ import (
 
 var roomStore = store.NewMemoryStore()
 
-type makeSnapshot struct {
-	players []domain.Player
-}
-
-var (
-	makeMu        sync.Mutex
-	lastMakeState = make(map[string]makeSnapshot)
-)
+var ErrNoLastMake = errors.New("no previous make result")
 
 var commands = []*discordgo.ApplicationCommand{
 	{
@@ -52,6 +44,10 @@ var commands = []*discordgo.ApplicationCommand{
 		Name:        "make",
 		Description: "create balanced 4v4 teams from participants",
 	},
+	{
+		Name:        "reroll",
+		Description: "reroll teams using last /make participant snapshot",
+	},
 }
 
 func RegisterGuildCommands(s *discordgo.Session, appID, guildID string) error {
@@ -79,6 +75,8 @@ func HandleInteraction(s *discordgo.Session, ic *discordgo.InteractionCreate) {
 		handleList(s, ic)
 	case "make":
 		handleMake(s, ic)
+	case "reroll":
+		handleReroll(s, ic)
 	}
 }
 
@@ -165,7 +163,7 @@ func handleMake(s *discordgo.Session, ic *discordgo.InteractionCreate) {
 	}
 
 	players := roomStore.List(ic.GuildID, ic.ChannelID)
-	result, err := domain.BuildMatch(players, time.Now().UnixNano())
+	result, err := runMatchAndStore(ic.GuildID, ic.ChannelID, players, time.Now().UnixNano())
 	if errors.Is(err, domain.ErrNotEnoughPlayers) {
 		respond(s, ic, "参加者が8人未満のためチーム分けできません。", true)
 		return
@@ -175,9 +173,24 @@ func handleMake(s *discordgo.Session, ic *discordgo.InteractionCreate) {
 		return
 	}
 
-	makeMu.Lock()
-	lastMakeState[roomID(ic.GuildID, ic.ChannelID)] = makeSnapshot{players: copyPlayers(players)}
-	makeMu.Unlock()
+	respond(s, ic, formatMatchResult(result), false)
+}
+
+func handleReroll(s *discordgo.Session, ic *discordgo.InteractionCreate) {
+	if ic.GuildID == "" {
+		respond(s, ic, "このコマンドはサーバー内で実行してください。", true)
+		return
+	}
+
+	result, err := rerollFromLastSnapshot(ic.GuildID, ic.ChannelID, time.Now().UnixNano())
+	if errors.Is(err, ErrNoLastMake) {
+		respond(s, ic, "先に /make を実行してください。", true)
+		return
+	}
+	if err != nil {
+		respond(s, ic, "再抽選に失敗しました。", true)
+		return
+	}
 
 	respond(s, ic, formatMatchResult(result), false)
 }
@@ -259,12 +272,19 @@ func formatMatchResult(result domain.MatchResult) string {
 	return strings.TrimSpace(b.String())
 }
 
-func roomID(guildID, channelID string) string {
-	return guildID + ":" + channelID
+func runMatchAndStore(guildID, channelID string, players []domain.Player, seed int64) (domain.MatchResult, error) {
+	result, err := domain.BuildMatch(players, seed)
+	if err != nil {
+		return domain.MatchResult{}, err
+	}
+	roomStore.SaveLastMatch(guildID, channelID, seed, players, result)
+	return result, nil
 }
 
-func copyPlayers(players []domain.Player) []domain.Player {
-	cp := make([]domain.Player, len(players))
-	copy(cp, players)
-	return cp
+func rerollFromLastSnapshot(guildID, channelID string, seed int64) (domain.MatchResult, error) {
+	state, ok := roomStore.GetState(guildID, channelID)
+	if !ok || len(state.LastPlayersSnapshot) == 0 {
+		return domain.MatchResult{}, ErrNoLastMake
+	}
+	return runMatchAndStore(guildID, channelID, state.LastPlayersSnapshot, seed)
 }
