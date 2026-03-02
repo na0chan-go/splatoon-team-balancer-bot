@@ -101,13 +101,13 @@ func handleJoin(s *discordgo.Session, ic *discordgo.InteractionCreate) {
 		XPower: xpower,
 	}
 
-	err := roomStore.Join(ic.GuildID, ic.ChannelID, player)
-	if errors.Is(err, store.ErrAlreadyJoined) {
-		respond(s, ic, "すでに参加しています。重複登録はできません。", true)
-		return
-	}
+	created, err := roomStore.Join(ic.GuildID, ic.ChannelID, player)
 	if errors.Is(err, store.ErrRoomFull) {
 		respond(s, ic, "参加者が10人に達しているため参加できません。", true)
+		return
+	}
+	if errors.Is(err, store.ErrInvalidXPower) {
+		respond(s, ic, "XPower は 0〜5000 の範囲で入力してください。", true)
 		return
 	}
 	if err != nil {
@@ -115,7 +115,11 @@ func handleJoin(s *discordgo.Session, ic *discordgo.InteractionCreate) {
 		return
 	}
 
-	respond(s, ic, fmt.Sprintf("参加登録しました: %s (%d)", player.Name, player.XPower), false)
+	if created {
+		respond(s, ic, fmt.Sprintf("参加登録しました: %s (%d)", player.Name, player.XPower), false)
+		return
+	}
+	respond(s, ic, fmt.Sprintf("参加情報を更新しました: %s (%d)", player.Name, player.XPower), false)
 }
 
 func handleLeave(s *discordgo.Session, ic *discordgo.InteractionCreate) {

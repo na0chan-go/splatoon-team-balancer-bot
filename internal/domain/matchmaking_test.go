@@ -41,6 +41,22 @@ func TestBuildMatch_10Players_Has2Spectators(t *testing.T) {
 	}
 }
 
+func TestBuildMatch_9Players_Has1Spectator(t *testing.T) {
+	players := makePlayers([]int{2550, 2500, 2450, 2400, 2350, 2300, 2250, 2200, 2150})
+
+	result, err := BuildMatch(players, 99)
+	if err != nil {
+		t.Fatalf("BuildMatch returned error: %v", err)
+	}
+
+	if len(result.TeamA) != 4 || len(result.TeamB) != 4 {
+		t.Fatalf("expected TeamA/TeamB to be 4 players each, got %d/%d", len(result.TeamA), len(result.TeamB))
+	}
+	if len(result.Spectators) != 1 {
+		t.Fatalf("expected 1 spectator, got %d", len(result.Spectators))
+	}
+}
+
 func TestBuildMatch_DeterministicWithSameSeed(t *testing.T) {
 	players := makePlayers([]int{2600, 2550, 2500, 2450, 2400, 2350, 2300, 2250, 1800, 1700})
 	seed := int64(20260302)

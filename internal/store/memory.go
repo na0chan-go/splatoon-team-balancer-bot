@@ -10,11 +10,15 @@ import (
 
 var (
 	ErrRoomFull      = errors.New("room is full")
-	ErrAlreadyJoined = errors.New("player already joined")
 	ErrNotJoined     = errors.New("player not joined")
+	ErrInvalidXPower = errors.New("xpower must be between 0 and 5000")
 )
 
-const maxPlayers = 10
+const (
+	maxPlayers = 10
+	minXPower  = 0
+	maxXPower  = 5000
+)
 
 type RoomState struct {
 	Players []domain.Player
@@ -31,25 +35,33 @@ func NewMemoryStore() *MemoryStore {
 	}
 }
 
-func (s *MemoryStore) Join(guildID, channelID string, player domain.Player) error {
+// Join adds a player to room or updates existing player's profile.
+// The returned bool is true when added as a new participant and false when updated.
+func (s *MemoryStore) Join(guildID, channelID string, player domain.Player) (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
+	if player.XPower < minXPower || player.XPower > maxXPower {
+		return false, ErrInvalidXPower
+	}
 
 	key := roomKey(guildID, channelID)
 	state := s.rooms[key]
 
-	for _, p := range state.Players {
+	for i, p := range state.Players {
 		if p.ID == player.ID {
-			return ErrAlreadyJoined
+			state.Players[i] = player
+			s.rooms[key] = state
+			return false, nil
 		}
 	}
 	if len(state.Players) >= maxPlayers {
-		return ErrRoomFull
+		return false, ErrRoomFull
 	}
 
 	state.Players = append(state.Players, player)
 	s.rooms[key] = state
-	return nil
+	return true, nil
 }
 
 func (s *MemoryStore) Leave(guildID, channelID, userID string) error {
