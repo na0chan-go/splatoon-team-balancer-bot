@@ -115,6 +115,17 @@ Team Result Formatter
 
 ---
 
+# 依存方向ルール
+
+将来の層崩れを防ぐため、CIで依存方向を機械的に検証しています。
+
+- `internal/domain` は `internal/adapter` / `internal/app` を import しない
+- `internal/app` は `internal/adapter/discord` を import しない
+
+チェックは `scripts/check-dependency-rules.sh` で実行され、違反時はCIが失敗します。
+
+---
+
 # ディレクトリ構成
 
 cmd/bot/
