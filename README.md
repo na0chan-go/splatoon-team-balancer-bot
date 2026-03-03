@@ -131,6 +131,21 @@ Bravoチーム（合計: 9000）
 
 ---
 
+# Performance
+
+ベンチマークは手動実行のみです（CIでは実行しません）。
+
+```bash
+go test ./internal/domain -run '^$' -bench BenchmarkBuildMatchWorstCase10Players -benchmem
+go test ./internal/adapter/store -run '^$' -bench BenchmarkSQLiteStoreLoadSave -benchmem
+```
+
+代表値（例、Apple M3）:
+
+- `BenchmarkBuildMatchWorstCase10Players`: `218038 ns/op`
+
+---
+
 # アーキテクチャ
 
 レイヤー分離（adapter / app / domain）を採用しています。  
