@@ -12,9 +12,11 @@ var (
 )
 
 type Player struct {
-	ID     string
-	Name   string
-	XPower int
+	ID             string `json:"id"`
+	Name           string `json:"name"`
+	XPower         int    `json:"xpower"`
+	PauseRemaining int    `json:"pause_remaining"`
+	PauseReason    string `json:"pause_reason,omitempty"`
 }
 
 type MatchResult struct {

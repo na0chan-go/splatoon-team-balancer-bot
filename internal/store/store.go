@@ -13,9 +13,13 @@ type Store interface {
 	Join(guildID, channelID string, player domain.Player) (bool, error)
 	Leave(guildID, channelID, userID string) error
 	List(guildID, channelID string) []domain.Player
+	Paused(guildID, channelID string) []domain.Player
 	SaveLastMatch(guildID, channelID string, seed int64, players []domain.Player, result domain.MatchResult)
 	GetState(guildID, channelID string) (RoomState, bool)
 	ResetRoom(guildID, channelID string)
+	SetPause(guildID, channelID, userID string, matches int, reason string) error
+	Resume(guildID, channelID, userID string) error
+	DecrementPauses(guildID, channelID string)
 	GetPlayerStats(userIDs []string) map[string]PlayerStat
 	RecordMatchResult(guildID, channelID, winnerTeam string, result domain.MatchResult) error
 }

@@ -113,6 +113,9 @@ func TestNextMatchFromCurrentParticipantsRequiresAtLeast8Players(t *testing.T) {
 	if _, err := runMatchAndStore("g1", "c1", players, 42); err != nil {
 		t.Fatalf("runMatchAndStore failed: %v", err)
 	}
+	if err := roomStore.SetPause("g1", "c1", "u7", 1, "break"); err != nil {
+		t.Fatalf("SetPause failed: %v", err)
+	}
 
 	if err := roomStore.Leave("g1", "c1", "u8"); err != nil {
 		t.Fatalf("leave failed: %v", err)
@@ -121,5 +124,59 @@ func TestNextMatchFromCurrentParticipantsRequiresAtLeast8Players(t *testing.T) {
 	_, err := nextMatchFromCurrentParticipants("g1", "c1", 43)
 	if !errors.Is(err, domain.ErrNotEnoughPlayers) {
 		t.Fatalf("expected ErrNotEnoughPlayers, got %v", err)
+	}
+
+	state, ok := roomStore.GetState("g1", "c1")
+	if !ok {
+		t.Fatal("expected state to exist")
+	}
+	for _, p := range state.Players {
+		if p.ID == "u7" && p.PauseRemaining != 0 {
+			t.Fatalf("expected u7 to auto-resume after decrement, got %d", p.PauseRemaining)
+		}
+	}
+}
+
+func TestNextMatchSkipsPausedPlayersAndDecrementsOnSuccess(t *testing.T) {
+	roomStore = store.NewMemoryStore()
+
+	players := make([]domain.Player, 0, 9)
+	for i := 1; i <= 9; i++ {
+		p := domain.Player{
+			ID:     fmt.Sprintf("u%d", i),
+			Name:   fmt.Sprintf("p%d", i),
+			XPower: 2100 + i*10,
+		}
+		players = append(players, p)
+		if _, err := roomStore.Join("g1", "c1", p); err != nil {
+			t.Fatalf("join failed: %v", err)
+		}
+	}
+	if err := roomStore.SetPause("g1", "c1", "u9", 2, "rest"); err != nil {
+		t.Fatalf("SetPause failed: %v", err)
+	}
+
+	if _, err := runMatchAndStore("g1", "c1", players, 100); err != nil {
+		t.Fatalf("runMatchAndStore failed: %v", err)
+	}
+
+	got, err := nextMatchFromCurrentParticipants("g1", "c1", 101)
+	if err != nil {
+		t.Fatalf("nextMatchFromCurrentParticipants failed: %v", err)
+	}
+	if len(got.Spectators) != 0 {
+		t.Fatalf("expected no spectators with 8 active players, got %d", len(got.Spectators))
+	}
+	for _, p := range append(append([]domain.Player{}, got.TeamA...), got.TeamB...) {
+		if p.ID == "u9" {
+			t.Fatal("expected paused player u9 to be excluded from next match")
+		}
+	}
+
+	state, _ := roomStore.GetState("g1", "c1")
+	for _, p := range state.Players {
+		if p.ID == "u9" && p.PauseRemaining != 1 {
+			t.Fatalf("expected u9 pause remaining to decrement to 1, got %d", p.PauseRemaining)
+		}
 	}
 }

@@ -62,6 +62,8 @@ func (s *MemoryStore) Join(guildID, channelID string, player domain.Player) (boo
 
 	for i, p := range state.Players {
 		if p.ID == player.ID {
+			player.PauseRemaining = p.PauseRemaining
+			player.PauseReason = p.PauseReason
 			state.Players[i] = player
 			s.rooms[key] = state
 			return false, nil
@@ -169,6 +171,82 @@ func (s *MemoryStore) List(guildID, channelID string) []domain.Player {
 		return players[i].XPower > players[j].XPower
 	})
 	return players
+}
+
+func (s *MemoryStore) Paused(guildID, channelID string) []domain.Player {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	key := roomKey(guildID, channelID)
+	state, ok := s.rooms[key]
+	if !ok {
+		return nil
+	}
+
+	var paused []domain.Player
+	for _, p := range state.Players {
+		if p.PauseRemaining > 0 {
+			paused = append(paused, p)
+		}
+	}
+	sort.Slice(paused, func(i, j int) bool {
+		if paused[i].PauseRemaining == paused[j].PauseRemaining {
+			return paused[i].Name < paused[j].Name
+		}
+		return paused[i].PauseRemaining > paused[j].PauseRemaining
+	})
+	return paused
+}
+
+func (s *MemoryStore) SetPause(guildID, channelID, userID string, matches int, reason string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	key := roomKey(guildID, channelID)
+	state, ok := s.rooms[key]
+	if !ok {
+		return ErrNotJoined
+	}
+	for i, p := range state.Players {
+		if p.ID != userID {
+			continue
+		}
+		p.PauseRemaining = matches
+		p.PauseReason = reason
+		state.Players[i] = p
+		s.rooms[key] = state
+		return nil
+	}
+	return ErrNotJoined
+}
+
+func (s *MemoryStore) Resume(guildID, channelID, userID string) error {
+	return s.SetPause(guildID, channelID, userID, 0, "")
+}
+
+func (s *MemoryStore) DecrementPauses(guildID, channelID string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	key := roomKey(guildID, channelID)
+	state, ok := s.rooms[key]
+	if !ok {
+		return
+	}
+	for i, p := range state.Players {
+		if p.PauseRemaining <= 0 {
+			continue
+		}
+		p.PauseRemaining--
+		if p.PauseRemaining < 0 {
+			p.PauseRemaining = 0
+		}
+		if p.PauseRemaining == 0 {
+			p.PauseReason = ""
+		}
+		state.Players[i] = p
+	}
+	s.rooms[key] = state
 }
 
 func (s *MemoryStore) GetPlayerStats(userIDs []string) map[string]PlayerStat {

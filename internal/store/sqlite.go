@@ -66,6 +66,8 @@ func (s *SQLiteStore) Join(guildID, channelID string, player domain.Player) (boo
 
 	for i, p := range state.Players {
 		if p.ID == player.ID {
+			player.PauseRemaining = p.PauseRemaining
+			player.PauseReason = p.PauseReason
 			state.Players[i] = player
 			if err := s.upsertStateLocked(guildID, channelID, state); err != nil {
 				return false, err
@@ -122,6 +124,77 @@ func (s *SQLiteStore) List(guildID, channelID string) []domain.Player {
 	players := copyPlayers(state.Players)
 	sortPlayers(players)
 	return players
+}
+
+func (s *SQLiteStore) Paused(guildID, channelID string) []domain.Player {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	state, _, err := s.getRoomStateLocked(guildID, channelID)
+	if err != nil {
+		return nil
+	}
+	var paused []domain.Player
+	for _, p := range state.Players {
+		if p.PauseRemaining > 0 {
+			paused = append(paused, p)
+		}
+	}
+	sort.Slice(paused, func(i, j int) bool {
+		if paused[i].PauseRemaining == paused[j].PauseRemaining {
+			return paused[i].Name < paused[j].Name
+		}
+		return paused[i].PauseRemaining > paused[j].PauseRemaining
+	})
+	return paused
+}
+
+func (s *SQLiteStore) SetPause(guildID, channelID, userID string, matches int, reason string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	state, _, err := s.getRoomStateLocked(guildID, channelID)
+	if err != nil {
+		return err
+	}
+	for i, p := range state.Players {
+		if p.ID != userID {
+			continue
+		}
+		p.PauseRemaining = matches
+		p.PauseReason = reason
+		state.Players[i] = p
+		return s.upsertStateLocked(guildID, channelID, state)
+	}
+	return ErrNotJoined
+}
+
+func (s *SQLiteStore) Resume(guildID, channelID, userID string) error {
+	return s.SetPause(guildID, channelID, userID, 0, "")
+}
+
+func (s *SQLiteStore) DecrementPauses(guildID, channelID string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	state, ok, err := s.getRoomStateLocked(guildID, channelID)
+	if err != nil || !ok {
+		return
+	}
+	for i, p := range state.Players {
+		if p.PauseRemaining <= 0 {
+			continue
+		}
+		p.PauseRemaining--
+		if p.PauseRemaining < 0 {
+			p.PauseRemaining = 0
+		}
+		if p.PauseRemaining == 0 {
+			p.PauseReason = ""
+		}
+		state.Players[i] = p
+	}
+	_ = s.upsertStateLocked(guildID, channelID, state)
 }
 
 func (s *SQLiteStore) SaveLastMatch(guildID, channelID string, seed int64, players []domain.Player, result domain.MatchResult) {

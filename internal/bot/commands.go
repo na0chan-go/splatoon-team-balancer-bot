@@ -60,6 +60,46 @@ var commands = []*discordgo.ApplicationCommand{
 		Description: "create next match from current participants",
 	},
 	{
+		Name:        "pause",
+		Description: "temporarily pause a player for some matches",
+		Options: []*discordgo.ApplicationCommandOption{
+			{
+				Type:        discordgo.ApplicationCommandOptionInteger,
+				Name:        "matches",
+				Description: "number of matches to pause (default: 3)",
+				Required:    false,
+			},
+			{
+				Type:        discordgo.ApplicationCommandOptionString,
+				Name:        "reason",
+				Description: "optional pause reason",
+				Required:    false,
+			},
+			{
+				Type:        discordgo.ApplicationCommandOptionUser,
+				Name:        "user",
+				Description: "target user (default: yourself)",
+				Required:    false,
+			},
+		},
+	},
+	{
+		Name:        "resume",
+		Description: "resume a paused player",
+		Options: []*discordgo.ApplicationCommandOption{
+			{
+				Type:        discordgo.ApplicationCommandOptionUser,
+				Name:        "user",
+				Description: "target user (default: yourself)",
+				Required:    false,
+			},
+		},
+	},
+	{
+		Name:        "paused",
+		Description: "show paused players in this room",
+	},
+	{
 		Name:        "reroll",
 		Description: "reroll teams using last /make participant snapshot",
 	},
@@ -112,6 +152,12 @@ func HandleInteraction(s *discordgo.Session, ic *discordgo.InteractionCreate) {
 		handleMake(s, ic)
 	case "next":
 		handleNext(s, ic)
+	case "pause":
+		handlePause(s, ic)
+	case "resume":
+		handleResume(s, ic)
+	case "paused":
+		handlePaused(s, ic)
 	case "reroll":
 		handleReroll(s, ic)
 	case "reset":
@@ -259,6 +305,109 @@ func handleNext(s *discordgo.Session, ic *discordgo.InteractionCreate) {
 	respondEmbed(s, ic, util.MatchResultEmbed(result), false)
 }
 
+func handlePause(s *discordgo.Session, ic *discordgo.InteractionCreate) {
+	if ic.GuildID == "" {
+		respond(s, ic, "このコマンドはサーバー内で実行してください。", true)
+		return
+	}
+
+	targetID := ""
+	targetName := ""
+	if u, ok := userOption(s, ic.ApplicationCommandData().Options, "user"); ok && u != nil {
+		targetID = u.ID
+		targetName = u.Username
+	} else {
+		u := interactionUser(ic)
+		if u == nil {
+			respond(s, ic, "ユーザー情報を取得できませんでした。", true)
+			return
+		}
+		targetID = u.ID
+		targetName = displayName(ic)
+	}
+
+	matches := 3
+	if v, ok := intOption(ic.ApplicationCommandData().Options, "matches"); ok {
+		matches = v
+	}
+	if matches < 1 {
+		respond(s, ic, "matches は1以上を指定してください。", true)
+		return
+	}
+	reason, _ := stringOption(ic.ApplicationCommandData().Options, "reason")
+
+	if err := roomStore.SetPause(ic.GuildID, ic.ChannelID, targetID, matches, reason); err != nil {
+		if errors.Is(err, store.ErrNotJoined) {
+			respond(s, ic, "対象ユーザーはこの部屋に参加していません。", true)
+			return
+		}
+		respond(s, ic, "pause の設定に失敗しました。", true)
+		return
+	}
+
+	msg := fmt.Sprintf("%s を %d 試合 pause しました。", targetName, matches)
+	if strings.TrimSpace(reason) != "" {
+		msg += fmt.Sprintf(" 理由: %s", reason)
+	}
+	respond(s, ic, msg, false)
+}
+
+func handleResume(s *discordgo.Session, ic *discordgo.InteractionCreate) {
+	if ic.GuildID == "" {
+		respond(s, ic, "このコマンドはサーバー内で実行してください。", true)
+		return
+	}
+
+	targetID := ""
+	targetName := ""
+	if u, ok := userOption(s, ic.ApplicationCommandData().Options, "user"); ok && u != nil {
+		targetID = u.ID
+		targetName = u.Username
+	} else {
+		u := interactionUser(ic)
+		if u == nil {
+			respond(s, ic, "ユーザー情報を取得できませんでした。", true)
+			return
+		}
+		targetID = u.ID
+		targetName = displayName(ic)
+	}
+
+	if err := roomStore.Resume(ic.GuildID, ic.ChannelID, targetID); err != nil {
+		if errors.Is(err, store.ErrNotJoined) {
+			respond(s, ic, "対象ユーザーはこの部屋に参加していません。", true)
+			return
+		}
+		respond(s, ic, "resume に失敗しました。", true)
+		return
+	}
+	respond(s, ic, fmt.Sprintf("%s を復帰させました。", targetName), false)
+}
+
+func handlePaused(s *discordgo.Session, ic *discordgo.InteractionCreate) {
+	if ic.GuildID == "" {
+		respond(s, ic, "このコマンドはサーバー内で実行してください。", true)
+		return
+	}
+
+	paused := roomStore.Paused(ic.GuildID, ic.ChannelID)
+	if len(paused) == 0 {
+		respond(s, ic, "pause中のプレイヤーはいません。", false)
+		return
+	}
+
+	var b strings.Builder
+	b.WriteString("pause中のプレイヤー\n")
+	for _, p := range paused {
+		if p.PauseReason != "" {
+			fmt.Fprintf(&b, "- %s: 残り%d試合（%s）\n", p.Name, p.PauseRemaining, p.PauseReason)
+			continue
+		}
+		fmt.Fprintf(&b, "- %s: 残り%d試合\n", p.Name, p.PauseRemaining)
+	}
+	respond(s, ic, strings.TrimSpace(b.String()), false)
+}
+
 func handleReset(s *discordgo.Session, ic *discordgo.InteractionCreate) {
 	if ic.GuildID == "" {
 		respond(s, ic, "このコマンドはサーバー内で実行してください。", true)
@@ -345,6 +494,16 @@ func stringOption(opts []*discordgo.ApplicationCommandInteractionDataOption, nam
 	return "", false
 }
 
+func userOption(s *discordgo.Session, opts []*discordgo.ApplicationCommandInteractionDataOption, name string) (*discordgo.User, bool) {
+	for _, opt := range opts {
+		if opt.Name != name {
+			continue
+		}
+		return opt.UserValue(s), true
+	}
+	return nil, false
+}
+
 func interactionUser(ic *discordgo.InteractionCreate) *discordgo.User {
 	if ic.Member != nil && ic.Member.User != nil {
 		return ic.Member.User
@@ -398,13 +557,22 @@ func rerollFromLastSnapshot(guildID, channelID string, seed int64) (domain.Match
 }
 
 func nextMatchFromCurrentParticipants(guildID, channelID string, seed int64) (domain.MatchResult, error) {
+	defer roomStore.DecrementPauses(guildID, channelID)
+
 	state, ok := roomStore.GetState(guildID, channelID)
 	if !ok || len(state.LastResult.TeamA) == 0 || len(state.LastResult.TeamB) == 0 {
 		return domain.MatchResult{}, ErrNoPreviousMatch
 	}
 
 	players := roomStore.List(guildID, channelID)
-	return runMatchAndStore(guildID, channelID, players, seed)
+	var active []domain.Player
+	for _, p := range players {
+		if p.PauseRemaining > 0 {
+			continue
+		}
+		active = append(active, p)
+	}
+	return runMatchAndStore(guildID, channelID, active, seed)
 }
 
 func hasResetPermission(ic *discordgo.InteractionCreate) bool {
