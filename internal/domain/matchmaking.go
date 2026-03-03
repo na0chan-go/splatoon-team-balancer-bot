@@ -44,10 +44,20 @@ func BuildMatch(players []Player, seed int64) (MatchResult, error) {
 // BuildMatchWithSpectatorPenalty creates a match with spectator-rotation preference.
 // Team balance (Diff) is still primary, and rotation is applied within diffSlack range.
 func BuildMatchWithSpectatorPenalty(players []Player, seed int64, diffSlack int, penaltyFn func([]Player) int) (MatchResult, error) {
+	if penaltyFn == nil {
+		return buildMatch(players, seed, diffSlack, nil)
+	}
+	return buildMatch(players, seed, diffSlack, func(result MatchResult) int {
+		return penaltyFn(result.Spectators)
+	})
+}
+
+// BuildMatchWithResultPenalty applies custom penalty on full candidate result.
+func BuildMatchWithResultPenalty(players []Player, seed int64, diffSlack int, penaltyFn func(MatchResult) int) (MatchResult, error) {
 	return buildMatch(players, seed, diffSlack, penaltyFn)
 }
 
-func buildMatch(players []Player, seed int64, diffSlack int, penaltyFn func([]Player) int) (MatchResult, error) {
+func buildMatch(players []Player, seed int64, diffSlack int, penaltyFn func(MatchResult) int) (MatchResult, error) {
 	if len(players) < 8 {
 		return MatchResult{}, ErrNotEnoughPlayers
 	}
@@ -74,13 +84,7 @@ func buildMatch(players []Player, seed int64, diffSlack int, penaltyFn func([]Pl
 	return buildResult(players, chosen), nil
 }
 
-func selectCandidatesByBalanceAndPenalty(
-	players []Player,
-	candidates []matchCandidate,
-	bestDiff int,
-	diffSlack int,
-	penaltyFn func([]Player) int,
-) []matchCandidate {
+func selectCandidatesByBalanceAndPenalty(players []Player, candidates []matchCandidate, bestDiff int, diffSlack int, penaltyFn func(MatchResult) int) []matchCandidate {
 	if penaltyFn == nil || diffSlack <= 0 {
 		return filterByDiff(candidates, bestDiff)
 	}
@@ -99,8 +103,7 @@ func selectCandidatesByBalanceAndPenalty(
 	bestPenalty := math.MaxInt
 	penaltyByKey := make(map[string]int, len(eligible))
 	for _, c := range eligible {
-		spectators := spectatorsForCandidate(players, c)
-		penalty := penaltyFn(spectators)
+		penalty := penaltyFn(buildResult(players, c))
 		key := candidateKey(c)
 		penaltyByKey[key] = penalty
 		if penalty < bestPenalty {
@@ -138,24 +141,6 @@ func filterByDiff(candidates []matchCandidate, diff int) []matchCandidate {
 		}
 	}
 	return filtered
-}
-
-func spectatorsForCandidate(players []Player, c matchCandidate) []Player {
-	inMatch := make(map[int]bool, 8)
-	for _, idx := range c.teamAIdx {
-		inMatch[idx] = true
-	}
-	for _, idx := range c.teamBIdx {
-		inMatch[idx] = true
-	}
-
-	spectators := make([]Player, 0, len(players)-8)
-	for idx, p := range players {
-		if !inMatch[idx] {
-			spectators = append(spectators, p)
-		}
-	}
-	return spectators
 }
 
 func candidateKey(c matchCandidate) string {
