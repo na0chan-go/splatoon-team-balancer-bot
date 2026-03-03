@@ -36,6 +36,7 @@ type Store interface {
 	UndoRoomState(guildID, channelID string) (bool, error)
 	SaveLastMatch(guildID, channelID string, seed int64, players []domain.Player, result domain.MatchResult)
 	GetState(guildID, channelID string) (RoomState, bool)
+	ReplaceState(guildID, channelID string, state RoomState) error
 	ResetRoom(guildID, channelID string)
 	SetPause(guildID, channelID, userID string, matches int, reason string) error
 	Resume(guildID, channelID, userID string) error

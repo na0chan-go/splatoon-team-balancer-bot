@@ -8,9 +8,9 @@ import (
 	"syscall"
 
 	"github.com/bwmarrin/discordgo"
+	storeadapter "github.com/na0chan-go/splatoon-team-balancer-bot/internal/adapter/store"
 	"github.com/na0chan-go/splatoon-team-balancer-bot/internal/bot"
 	"github.com/na0chan-go/splatoon-team-balancer-bot/internal/config"
-	"github.com/na0chan-go/splatoon-team-balancer-bot/internal/store"
 )
 
 func main() {
@@ -19,7 +19,7 @@ func main() {
 		log.Fatalf("failed to load config: %v", err)
 	}
 
-	persistentStore, err := store.NewSQLiteStore(cfg.SQLitePath)
+	persistentStore, err := storeadapter.NewSQLiteStore(cfg.SQLitePath)
 	if err != nil {
 		log.Fatalf("failed to initialize sqlite store: %v", err)
 	}

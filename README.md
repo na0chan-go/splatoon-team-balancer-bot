@@ -123,8 +123,17 @@ Botのエントリーポイント
 internal/bot/
 Discordコマンド処理
 
+internal/app/usecase/
+ユースケース（コマンドの業務ロジック）
+
+internal/adapter/
+Discord表示・SQLiteなど外部I/Oアダプタ
+
 internal/domain/
-チーム分けアルゴリズム
+チーム分けアルゴリズム・純粋ロジック
+
+internal/domain/room/
+RoomStateなどドメイン状態
 
 internal/store/
 状態管理（メモリ / DB）
