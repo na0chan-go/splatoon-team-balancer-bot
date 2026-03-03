@@ -22,5 +22,8 @@ jobs:
           go install honnef.co/go/tools/cmd/staticcheck@latest
           staticcheck ./...
 
+      - name: dependency direction
+        run: ./scripts/check-dependency-rules.sh
+
       - name: go test
         run: go test ./... -race
