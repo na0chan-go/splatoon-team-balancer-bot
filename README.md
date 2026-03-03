@@ -2,16 +2,17 @@
 
 # Splatoon3 プライベートマッチ チーム分けBot
 
-Splatoon3 のプライベートマッチでチーム分けを自動化する Discord Bot です。
-参加者が **Xパワーを申告して参加**すると、Botが **チームの合計パワー差が最小になるように自動で4v4のチーム分け**を行います。
+このBotは、プラベ参加者が `/join xpower` で集まったら、チーム合計Xパワー差が最小になるように 4v4 を自動で作ります。9〜10人でもそのまま使え、観戦を自動で選びつつ次試合の編成まで回せます。
 
-10人参加した場合は、8人をプレイヤーとして選び、残り2人を観戦に回します。
+## /make Embed デモ
 
-手動でのチーム分けの手間や「戦力差による不公平」を減らすことを目的としています。
+![make-embed-demo](docs/images/make-embed-demo.svg)
+
+---
 
 ## Quickstart
 
-### 1) 環境変数を設定
+### 1) 環境変数
 
 ```bash
 export DISCORD_TOKEN=your_token
@@ -26,7 +27,7 @@ export SQLITE_PATH=./data.db
 go run cmd/bot/main.go
 ```
 
-### 2-B) Docker実行（永続化あり）
+### 2-B) Docker実行（DB永続化）
 
 ```bash
 docker build -t splatoon-team-balancer-bot .
@@ -41,362 +42,86 @@ docker run --rm \
 
 ---
 
-## ポイント
+## 最短導線（まずこれだけ）
 
-- **10C8 × (8C4 / 2) = 1575** の全探索で最適解を保証
-- **永続化（SQLite）** により再起動後も部屋状態を復元
-- **決定性（seed）** により結果の再現が可能
-- **観戦ローテーション** により、同点/僅差では直近観戦者が連続しにくい
+1. 全員が `/join xpower` で参加
+2. `/make` で初回チーム分け
+3. 試合ごとに `/next` で次編成
 
-## /make Embed デモ
+補助:
 
-![make-embed-demo](docs/images/make-embed-demo.svg)
-
----
-
-# 設計ドキュメント
-
-詳細設計は以下を参照してください。
-
-- [Architecture](docs/ARCHITECTURE.md)
-- [Decisions](docs/DECISIONS.md)
-- [Releasing](docs/RELEASING.md)
-- [Changelog](CHANGELOG.md)
+- もう一回抽選したい: `/reroll`
+- 直前に戻したい: `/undo`
+- 自分の状態確認: `/whoami`
 
 ---
 
-# 主な機能
+## よくある運用例
 
-- Xパワーを入力してマッチに参加
-- 最大10人まで参加可能
-- 8人プレイ + 2人観戦に自動調整
-- 合計Xパワー差が最小になるチーム分け
-- 全探索アルゴリズムによる最適解保証
-- 同条件で再計算可能（reroll）
-- 観戦ローテーション（spectator_count / last_spectated_at を利用）
-- match history tracking（/result で勝敗を保存）
-- dynamic power adjustment（declared_xpower + rating_delta でマッチング）
-- 連打対策（room単位ロック + /make,/next の3秒クールダウン）
-
----
-
-# 使用例
-
-参加者が以下のように登録します。
-
-/join 2400
-/join 2350
-/join 2300
-/join 2250
-/join 2200
-/join 2150
-/join 2100
-/join 2050
-/join 2000
-/join 1950
-
-チーム分けコマンドを実行
-
-/make
-
-Botの出力例
-
-Alphaチーム（合計: 9000）
-
-- PlayerA (2400)
-- PlayerD (2250)
-- PlayerF (2150)
-- PlayerH (2050)
-
-Bravoチーム（合計: 9000）
-
-- PlayerB (2350)
-- PlayerC (2300)
-- PlayerE (2200)
-- PlayerG (2100)
-
-観戦
-
-- PlayerI (2000)
-- PlayerJ (1950)
-
-パワー差: 0
-
----
-
-# アルゴリズム
-
-最適解保証のため、`10C8 × (8C4 / 2) = 1575` 通りの全探索を行います。  
-詳細は [docs/DECISIONS.md](docs/DECISIONS.md) を参照してください。
-
----
-
-# Performance
-
-ベンチマークは手動実行のみです（CIでは実行しません）。
-
-```bash
-go test ./internal/domain -run '^$' -bench BenchmarkBuildMatchWorstCase10Players -benchmem
-go test ./internal/adapter/store -run '^$' -bench BenchmarkSQLiteStoreLoadSave -benchmem
-```
-
-代表値（例、Apple M3）:
-
-- `BenchmarkBuildMatchWorstCase10Players`: `218038 ns/op`
-
----
-
-# アーキテクチャ
-
-レイヤー分離（adapter / app / domain）を採用しています。  
-責務とデータフローの詳細は [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) を参照してください。
-
----
-
-# 依存方向ルール
-
-将来の層崩れを防ぐため、CIで依存方向を機械的に検証しています。
-
-- `internal/domain` は `internal/adapter` / `internal/app` を import しない
-- `internal/app` は `internal/adapter/discord` を import しない
-
-チェックは `scripts/check-dependency-rules.sh` で実行され、違反時はCIが失敗します。
-
----
-
-# ディレクトリ構成
-
-cmd/bot/
-Botのエントリーポイント
-
-internal/bot/
-Discordコマンド処理
-
-internal/app/usecase/
-ユースケース（コマンドの業務ロジック）
-
-internal/adapter/
-Discord表示・SQLiteなど外部I/Oアダプタ
-
-internal/domain/
-チーム分けアルゴリズム・純粋ロジック
-
-internal/domain/room/
-RoomStateなどドメイン状態
-
-internal/store/
-状態管理のinterface/メモリ実装
-
-internal/util/
-補助関数
-
----
-
-# 技術スタック
-
-言語
-Go
-
-主要ライブラリ
-
-- discordgo
-
-テスト
-
-- go test
-
----
-
-# 起動方法
-
-リポジトリをクローン
-
-GitHubから取得
-
-## 環境変数
-
-| 変数名 | 必須 | デフォルト | 説明 |
-| --- | --- | --- | --- |
-| `DISCORD_TOKEN` | 必須 | なし | Bot token（`Bot ` プレフィックス不要） |
-| `DISCORD_APP_ID` | 必須 | なし | Discord Application ID |
-| `DISCORD_GUILD_ID` | 任意 | 空 | 設定時はguild登録のみ。未設定時はglobal登録のみ |
-| `SQLITE_PATH` | 任意 | `./data.db` | SQLite DBファイルパス |
-
-開発中は `DISCORD_GUILD_ID` の設定を推奨します（guild command は反映が速い）。
-
-Botを起動
-
-```bash
-go run cmd/bot/main.go
-```
-
-起動後、指定Guildで `/ping` を実行すると `pong` が返ります。
-
----
-
-# Docker起動
-
-イメージをビルド
-
-```bash
-docker build -t splatoon-team-balancer-bot .
-```
-
-コンテナを起動
-
-```bash
-docker run --rm \
-  -e DISCORD_TOKEN=your_token \
-  -e DISCORD_APP_ID=123456789012345678 \
-  -e DISCORD_GUILD_ID=123456789012345678 \
-  -e SQLITE_PATH=/data/db.sqlite \
-  -v "$(pwd)/data:/data" \
-  splatoon-team-balancer-bot
-```
-
-補足
-
-- 実行バイナリはコンテナ内 `/app/bot`
-- 永続化する場合は `-v "$(pwd)/data:/data"` と `SQLITE_PATH=/data/db.sqlite` を推奨
-
----
-
-# DB初期化/マイグレーション
-
-- 起動時にSQLiteマイグレーションを自動実行します
-- マイグレーションSQLは `migrations/` で管理します
-- 適用履歴は `schema_migrations` テーブルに保存され、既存DBにも安全に適用されます
-
----
-
-# コマンド一覧
-
-/join <xpower>
-マッチに参加
-
-/leave
-マッチから退出
-
-/list
-現在の参加者一覧
-
-/help
-最短フローと運用例を表示（Embed）
-
-困ったときは `/diagnose`（管理者のみ）で room 状態とクールダウン/ロック状況を確認できます。
-
-/settings show
-このroomの運用設定を表示
-
-/settings set key value
-このroomの運用設定を更新（管理者のみ）
-
-/make
-チーム分けを実行
-
-/next
-現在の参加者で次試合を作成
-
-/pause
-数試合だけ一時離脱（トイレ・離席など）
-
-/resume
-一時離脱を解除
-
-/paused
-一時離脱中の一覧を表示
-
-/whoami
-自分の状態（pause残り・参加回数・観戦回数・XPower・rating_delta・wins/losses）を表示
-
-/undo
-直前の /make または /next の状態に戻す
-
-/reroll
-別の最適解を再計算
-
-/result <alpha|bravo>
-試合結果を記録してrating_deltaを更新（自己申告XPowerの補正に利用）
-
-/export type:(csv|json) scope:(room|all) limit:int
-試合履歴とプレイヤー統計をファイル出力
-（`scope=room` は現在のroom、`scope=all` は同一guild全体）
-
-/reset
-部屋を初期化
-
----
-
-# 運用例（一時離脱）
-
-例: 3試合だけ離席したい場合
+### トイレ・来客で数試合抜けたい
 
 ```text
 /pause matches:3 reason:トイレ
 ```
 
-この状態で `/next` が実行されるたびに残り試合数が1ずつ減り、0になると自動復帰します。  
-途中で戻る場合は `/resume` を実行してください。
+復帰したら:
 
-また、`/pause` 実行時にBotが投稿する案内メッセージへ対象ユーザーが 👍 リアクションすると、pauseを即時解除できます。
+```text
+/resume
+```
 
----
+### 誤操作した / ひとつ前に戻したい
 
-# Room設定（/settings）
-
-roomごとに以下を調整できます。
-
-- `make_next_cooldown_seconds`: `/make` と `/next` のクールダウン秒数
-- `spectator_rotation_weight`: 観戦ローテーションの重み
-- `same_team_avoidance_weight`: 同チーム回避の重み
-- `pause_default_matches`: `/pause` のデフォルト試合数
+```text
+/undo
+```
 
 ---
 
-# 初回オンボーディング
+## 10人参加時の挙動
 
-その部屋で最初に `/join` されたタイミングで、使い方Embedを1回だけ表示します。  
-2回目以降の `/join` ではオンボーディングは表示されず、通常の参加/更新メッセージのみ返します。
-
----
-
-# テスト
-
-すべてのテストを実行
-
-go test ./...
-
-テスト内容
-
-- 8人の場合に均等なチームが作れること
-- 10人の場合に観戦2人が選ばれること
-- 同じ乱数シードで結果が再現されること
+- 常に 8人を選んで 4v4 を作成
+- 残りは観戦（10人なら2人、9人なら1人）
+- 観戦ローテーションを考慮して連続観戦を減らす
 
 ---
 
-# 今後の改善案
+## 困ったとき
 
-- 観戦ローテーション機能
-- 同じチームが連続しない仕組み
-- SQLiteによる永続化
-- マッチ履歴の保存
-- Web UI
+- 使い方を出す: `/help`
+- 部屋状態を確認（管理者のみ）: `/diagnose`
 
----
+コマンドが出ないときのチェック:
 
-# このプロジェクトの背景
-
-Splatoonのプライベートマッチでは、
-プレイヤーの実力差による不公平を防ぐために
-手動でチーム分けをすることが多いです。
-
-しかし、手作業での調整は時間がかかり、
-公平なチーム分けを作るのも難しい問題があります。
-
-このBotは、その問題を **アルゴリズムで自動解決する**ことを目的に作られています。
+1. Botを招待したサーバーで実行しているか
+2. `DISCORD_APP_ID` / `DISCORD_GUILD_ID` が正しいか
+3. Bot招待時に `applications.commands` 権限があるか
+4. Bot再起動後、数十秒待ってDiscordクライアントを開き直す
 
 ---
 
-# ライセンス
+## 主要コマンド
 
-[MIT](./LICENSE)
+- `/join xpower` 参加/更新
+- `/leave` 退出
+- `/list` 参加者一覧
+- `/make` 初回チーム分け
+- `/next` 次試合を作成
+- `/pause` `/resume` `/paused` 一時離脱運用
+- `/undo` 直前状態へ復元
+- `/result winner:(alpha|bravo)` 勝敗記録
+- `/settings show|set` 部屋設定（setは管理者）
+- `/export` 履歴/統計を出力
+- `/reset` 部屋リセット（管理者）
+
+---
+
+## 技術者向けドキュメント
+
+- [TECH](docs/TECH.md)
+- [Architecture](docs/ARCHITECTURE.md)
+- [Decisions](docs/DECISIONS.md)
+- [Releasing](docs/RELEASING.md)
+- [Changelog](CHANGELOG.md)
+- [License (MIT)](LICENSE)
+
