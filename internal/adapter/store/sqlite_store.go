@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/na0chan-go/splatoon-team-balancer-bot/internal/domain"
 	corestore "github.com/na0chan-go/splatoon-team-balancer-bot/internal/store"
+	dbmigrations "github.com/na0chan-go/splatoon-team-balancer-bot/migrations"
 	_ "modernc.org/sqlite"
 )
 
@@ -348,94 +350,93 @@ func (s *SQLiteStore) ResetRoom(guildID, channelID string) {
 }
 
 func (s *SQLiteStore) init() error {
-	const roomStateSchema = `
-CREATE TABLE IF NOT EXISTS room_states (
-  guild_id TEXT NOT NULL,
-  channel_id TEXT NOT NULL,
-  players_json TEXT NOT NULL,
-  last_result_json TEXT NOT NULL,
-  last_seed INTEGER NOT NULL,
-  last_players_snapshot_json TEXT NOT NULL,
-  spectator_history_json TEXT NOT NULL DEFAULT '{}',
-  participation_counts_json TEXT NOT NULL DEFAULT '{}',
-  onboarding_shown INTEGER NOT NULL DEFAULT 0,
-  previous_state_json TEXT NOT NULL DEFAULT '',
-  PRIMARY KEY (guild_id, channel_id)
-);`
-
-	if _, err := s.db.Exec(roomStateSchema); err != nil {
-		return fmt.Errorf("failed to initialize sqlite schema: %w", err)
-	}
-	_, err := s.db.Exec(`ALTER TABLE room_states ADD COLUMN spectator_history_json TEXT NOT NULL DEFAULT '{}'`)
-	if err != nil && !strings.Contains(strings.ToLower(err.Error()), "duplicate column name") {
-		return fmt.Errorf("failed to migrate sqlite schema: %w", err)
-	}
-	_, err = s.db.Exec(`ALTER TABLE room_states ADD COLUMN previous_state_json TEXT NOT NULL DEFAULT ''`)
-	if err != nil && !strings.Contains(strings.ToLower(err.Error()), "duplicate column name") {
-		return fmt.Errorf("failed to migrate sqlite schema for history: %w", err)
-	}
-	_, err = s.db.Exec(`ALTER TABLE room_states ADD COLUMN participation_counts_json TEXT NOT NULL DEFAULT '{}'`)
-	if err != nil && !strings.Contains(strings.ToLower(err.Error()), "duplicate column name") {
-		return fmt.Errorf("failed to migrate sqlite schema for participation counts: %w", err)
-	}
-	_, err = s.db.Exec(`ALTER TABLE room_states ADD COLUMN onboarding_shown INTEGER NOT NULL DEFAULT 0`)
-	if err != nil && !strings.Contains(strings.ToLower(err.Error()), "duplicate column name") {
-		return fmt.Errorf("failed to migrate sqlite schema for onboarding flag: %w", err)
+	if _, err := s.db.Exec(`
+CREATE TABLE IF NOT EXISTS schema_migrations (
+  version TEXT PRIMARY KEY,
+  applied_at INTEGER NOT NULL
+);`); err != nil {
+		return fmt.Errorf("failed to initialize schema_migrations: %w", err)
 	}
 
-	const playerStatsSchema = `
-CREATE TABLE IF NOT EXISTS player_stats (
-  user_id TEXT PRIMARY KEY,
-  rating INTEGER NOT NULL DEFAULT 0,
-  rating_delta INTEGER NOT NULL DEFAULT 0,
-  wins INTEGER NOT NULL DEFAULT 0,
-  losses INTEGER NOT NULL DEFAULT 0,
-  last_played_at INTEGER NOT NULL DEFAULT 0
-);`
-	if _, err := s.db.Exec(playerStatsSchema); err != nil {
-		return fmt.Errorf("failed to initialize player_stats schema: %w", err)
+	entries, err := fs.ReadDir(dbmigrations.FS, ".")
+	if err != nil {
+		return fmt.Errorf("failed to read migration files: %w", err)
 	}
-	_, err = s.db.Exec(`ALTER TABLE player_stats ADD COLUMN rating_delta INTEGER NOT NULL DEFAULT 0`)
-	if err != nil && !strings.Contains(strings.ToLower(err.Error()), "duplicate column name") {
-		return fmt.Errorf("failed to migrate player_stats rating_delta: %w", err)
-	}
-	_, err = s.db.Exec(`ALTER TABLE player_stats ADD COLUMN last_played_at INTEGER NOT NULL DEFAULT 0`)
-	if err != nil && !strings.Contains(strings.ToLower(err.Error()), "duplicate column name") {
-		return fmt.Errorf("failed to migrate player_stats last_played_at: %w", err)
-	}
-	_, _ = s.db.Exec(`UPDATE player_stats SET rating_delta = rating WHERE rating_delta = 0 AND rating != 0`)
+	sort.Slice(entries, func(i, j int) bool {
+		return entries[i].Name() < entries[j].Name()
+	})
 
-	const matchesSchema = `
-CREATE TABLE IF NOT EXISTS matches (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  guild_id TEXT NOT NULL,
-  channel_id TEXT NOT NULL,
-  winner_team TEXT NOT NULL,
-  team_a_json TEXT NOT NULL,
-  team_b_json TEXT NOT NULL,
-  spectators_json TEXT NOT NULL,
-  sum_a INTEGER NOT NULL,
-  sum_b INTEGER NOT NULL,
-  diff INTEGER NOT NULL,
-  created_at INTEGER NOT NULL
-);`
-	if _, err := s.db.Exec(matchesSchema); err != nil {
-		return fmt.Errorf("failed to initialize matches schema: %w", err)
-	}
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".sql") {
+			continue
+		}
+		version := entry.Name()
 
-	const roomSettingsSchema = `
-CREATE TABLE IF NOT EXISTS room_settings (
-  guild_id TEXT NOT NULL,
-  channel_id TEXT NOT NULL,
-  key TEXT NOT NULL,
-  value TEXT NOT NULL,
-  PRIMARY KEY (guild_id, channel_id, key)
-);`
-	if _, err := s.db.Exec(roomSettingsSchema); err != nil {
-		return fmt.Errorf("failed to initialize room_settings schema: %w", err)
+		var applied int
+		if err := s.db.QueryRow(
+			`SELECT COUNT(1) FROM schema_migrations WHERE version = ?`,
+			version,
+		).Scan(&applied); err != nil {
+			return fmt.Errorf("failed to query migration %s: %w", version, err)
+		}
+		if applied > 0 {
+			continue
+		}
+
+		content, err := fs.ReadFile(dbmigrations.FS, version)
+		if err != nil {
+			return fmt.Errorf("failed to read migration %s: %w", version, err)
+		}
+		if err := s.applyMigration(version, string(content)); err != nil {
+			return err
+		}
 	}
 
 	return nil
+}
+
+func (s *SQLiteStore) applyMigration(version, content string) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to begin migration %s: %w", version, err)
+	}
+	defer func() {
+		_ = tx.Rollback()
+	}()
+
+	statements := strings.Split(content, ";")
+	for _, raw := range statements {
+		stmt := strings.TrimSpace(raw)
+		if stmt == "" {
+			continue
+		}
+		if _, err := tx.Exec(stmt); err != nil {
+			if isIgnorableDuplicateColumnError(err) && strings.HasPrefix(strings.ToUpper(stmt), "ALTER TABLE ") {
+				continue
+			}
+			return fmt.Errorf("failed to apply migration %s: %w", version, err)
+		}
+	}
+
+	if _, err := tx.Exec(
+		`INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)`,
+		version, time.Now().Unix(),
+	); err != nil {
+		return fmt.Errorf("failed to record migration %s: %w", version, err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit migration %s: %w", version, err)
+	}
+
+	return nil
+}
+
+func isIgnorableDuplicateColumnError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "duplicate column name")
 }
 
 func (s *SQLiteStore) getRoomStateLocked(guildID, channelID string) (RoomState, bool, error) {
