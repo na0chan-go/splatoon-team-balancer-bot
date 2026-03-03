@@ -219,6 +219,9 @@ docker run --rm \
 /make
 チーム分けを実行
 
+/next
+現在の参加者で次試合を作成
+
 /reroll
 別の最適解を再計算
 

@@ -2,6 +2,7 @@ package bot
 
 import (
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/bwmarrin/discordgo"
@@ -81,5 +82,44 @@ func TestHasResetPermission(t *testing.T) {
 	}
 	if hasResetPermission(normalInteraction) {
 		t.Fatal("expected normal member to not have reset permission")
+	}
+}
+
+func TestNextMatchFromCurrentParticipantsRequiresPreviousMake(t *testing.T) {
+	roomStore = store.NewMemoryStore()
+
+	_, err := nextMatchFromCurrentParticipants("g1", "c1", 1)
+	if !errors.Is(err, ErrNoPreviousMatch) {
+		t.Fatalf("expected ErrNoPreviousMatch, got %v", err)
+	}
+}
+
+func TestNextMatchFromCurrentParticipantsRequiresAtLeast8Players(t *testing.T) {
+	roomStore = store.NewMemoryStore()
+
+	players := make([]domain.Player, 0, 8)
+	for i := 1; i <= 8; i++ {
+		p := domain.Player{
+			ID:     fmt.Sprintf("u%d", i),
+			Name:   fmt.Sprintf("p%d", i),
+			XPower: 2000 + i*10,
+		}
+		players = append(players, p)
+		if _, err := roomStore.Join("g1", "c1", p); err != nil {
+			t.Fatalf("join failed: %v", err)
+		}
+	}
+
+	if _, err := runMatchAndStore("g1", "c1", players, 42); err != nil {
+		t.Fatalf("runMatchAndStore failed: %v", err)
+	}
+
+	if err := roomStore.Leave("g1", "c1", "u8"); err != nil {
+		t.Fatalf("leave failed: %v", err)
+	}
+
+	_, err := nextMatchFromCurrentParticipants("g1", "c1", 43)
+	if !errors.Is(err, domain.ErrNotEnoughPlayers) {
+		t.Fatalf("expected ErrNotEnoughPlayers, got %v", err)
 	}
 }

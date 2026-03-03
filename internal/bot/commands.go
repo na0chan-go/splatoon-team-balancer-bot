@@ -15,6 +15,7 @@ import (
 var roomStore store.Store = store.NewMemoryStore()
 
 var ErrNoLastMake = errors.New("no previous make result")
+var ErrNoPreviousMatch = errors.New("no previous match")
 
 const rotationDiffSlack = 50
 
@@ -53,6 +54,10 @@ var commands = []*discordgo.ApplicationCommand{
 	{
 		Name:        "make",
 		Description: "create balanced 4v4 teams from participants",
+	},
+	{
+		Name:        "next",
+		Description: "create next match from current participants",
 	},
 	{
 		Name:        "reroll",
@@ -105,6 +110,8 @@ func HandleInteraction(s *discordgo.Session, ic *discordgo.InteractionCreate) {
 		handleList(s, ic)
 	case "make":
 		handleMake(s, ic)
+	case "next":
+		handleNext(s, ic)
 	case "reroll":
 		handleReroll(s, ic)
 	case "reset":
@@ -223,6 +230,29 @@ func handleReroll(s *discordgo.Session, ic *discordgo.InteractionCreate) {
 	}
 	if err != nil {
 		respond(s, ic, "再抽選に失敗しました。", true)
+		return
+	}
+
+	respondEmbed(s, ic, util.MatchResultEmbed(result), false)
+}
+
+func handleNext(s *discordgo.Session, ic *discordgo.InteractionCreate) {
+	if ic.GuildID == "" {
+		respond(s, ic, "このコマンドはサーバー内で実行してください。", true)
+		return
+	}
+
+	result, err := nextMatchFromCurrentParticipants(ic.GuildID, ic.ChannelID, time.Now().UnixNano())
+	if errors.Is(err, ErrNoPreviousMatch) {
+		respond(s, ic, "先に /make を実行してください。", true)
+		return
+	}
+	if errors.Is(err, domain.ErrNotEnoughPlayers) {
+		respond(s, ic, "参加者が8人未満のため次試合を作成できません。", true)
+		return
+	}
+	if err != nil {
+		respond(s, ic, "次試合の作成に失敗しました。", true)
 		return
 	}
 
@@ -365,6 +395,16 @@ func rerollFromLastSnapshot(guildID, channelID string, seed int64) (domain.Match
 		return domain.MatchResult{}, ErrNoLastMake
 	}
 	return runMatchAndStore(guildID, channelID, state.LastPlayersSnapshot, seed)
+}
+
+func nextMatchFromCurrentParticipants(guildID, channelID string, seed int64) (domain.MatchResult, error) {
+	state, ok := roomStore.GetState(guildID, channelID)
+	if !ok || len(state.LastResult.TeamA) == 0 || len(state.LastResult.TeamB) == 0 {
+		return domain.MatchResult{}, ErrNoPreviousMatch
+	}
+
+	players := roomStore.List(guildID, channelID)
+	return runMatchAndStore(guildID, channelID, players, seed)
 }
 
 func hasResetPermission(ic *discordgo.InteractionCreate) bool {
