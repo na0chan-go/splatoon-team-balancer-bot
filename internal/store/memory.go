@@ -22,32 +22,6 @@ const (
 	maxXPower  = 5000
 )
 
-type RoomState struct {
-	Players             []domain.Player
-	LastResult          domain.MatchResult
-	LastSeed            int64
-	LastPlayersSnapshot []domain.Player
-	SpectatorHistory    map[string]SpectatorHistory
-	ParticipationCounts map[string]int
-	OnboardingShown     bool
-	PreviousState       *RoomStateSnapshot
-}
-
-type SpectatorHistory struct {
-	SpectatorCount  int   `json:"spectator_count"`
-	LastSpectatedAt int64 `json:"last_spectated_at"`
-}
-
-type RoomStateSnapshot struct {
-	Players             []domain.Player             `json:"players"`
-	LastResult          domain.MatchResult          `json:"last_result"`
-	LastSeed            int64                       `json:"last_seed"`
-	LastPlayersSnapshot []domain.Player             `json:"last_players_snapshot"`
-	SpectatorHistory    map[string]SpectatorHistory `json:"spectator_history"`
-	ParticipationCounts map[string]int              `json:"participation_counts"`
-	OnboardingShown     bool                        `json:"onboarding_shown"`
-}
-
 type MemoryStore struct {
 	mu          sync.RWMutex
 	rooms       map[string]RoomState
@@ -250,6 +224,24 @@ func (s *MemoryStore) GetState(guildID, channelID string) (RoomState, bool) {
 		OnboardingShown:     state.OnboardingShown,
 		PreviousState:       copySnapshot(state.PreviousState),
 	}, true
+}
+
+func (s *MemoryStore) ReplaceState(guildID, channelID string, state RoomState) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	key := roomKey(guildID, channelID)
+	s.rooms[key] = RoomState{
+		Players:             copyPlayers(state.Players),
+		LastResult:          copyResult(state.LastResult),
+		LastSeed:            state.LastSeed,
+		LastPlayersSnapshot: copyPlayers(state.LastPlayersSnapshot),
+		SpectatorHistory:    copySpectatorHistory(state.SpectatorHistory),
+		ParticipationCounts: copyParticipationCounts(state.ParticipationCounts),
+		OnboardingShown:     state.OnboardingShown,
+		PreviousState:       copySnapshot(state.PreviousState),
+	}
+	return nil
 }
 
 func (s *MemoryStore) List(guildID, channelID string) []domain.Player {

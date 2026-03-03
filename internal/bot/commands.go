@@ -11,6 +11,7 @@ import (
 
 	"github.com/bwmarrin/discordgo"
 	discordadapter "github.com/na0chan-go/splatoon-team-balancer-bot/internal/adapter/discord"
+	storeadapter "github.com/na0chan-go/splatoon-team-balancer-bot/internal/adapter/store"
 	"github.com/na0chan-go/splatoon-team-balancer-bot/internal/app/usecase"
 	"github.com/na0chan-go/splatoon-team-balancer-bot/internal/domain"
 	"github.com/na0chan-go/splatoon-team-balancer-bot/internal/store"
@@ -19,8 +20,13 @@ import (
 
 var roomStore store.Store = store.NewMemoryStore()
 var roomUC = usecase.NewRoomService(roomStore)
+var roomRepo = storeadapter.NewRoomRepository(roomStore)
 var pauseReactionRegistry = newPauseReactionRegistry()
 var roomCommandGuards = newRoomCommandGuardMap()
+
+func init() {
+	roomUC.SetRoomRepository(roomRepo)
+}
 
 var ErrNoLastMake = usecase.ErrNoLastMake
 var ErrNoPreviousMatch = usecase.ErrNoPreviousMatch
@@ -34,6 +40,8 @@ func SetStore(s store.Store) {
 	}
 	roomStore = s
 	roomUC.SetStore(s)
+	roomRepo = storeadapter.NewRoomRepository(s)
+	roomUC.SetRoomRepository(roomRepo)
 }
 
 var commands = []*discordgo.ApplicationCommand{

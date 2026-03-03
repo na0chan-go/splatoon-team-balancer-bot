@@ -308,6 +308,12 @@ func (s *SQLiteStore) GetState(guildID, channelID string) (RoomState, bool) {
 	}, true
 }
 
+func (s *SQLiteStore) ReplaceState(guildID, channelID string, state RoomState) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.upsertStateLocked(guildID, channelID, state)
+}
+
 func (s *SQLiteStore) ResetRoom(guildID, channelID string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

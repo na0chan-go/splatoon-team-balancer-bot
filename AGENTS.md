@@ -35,8 +35,17 @@ Entry point for the Discord bot.
 internal/bot/
 Discord command handling.
 
+internal/app/usecase/
+Command use cases and application workflow.
+
+internal/adapter/
+Discord/SQLite adapters.
+
 internal/domain/
 Core business logic such as matchmaking algorithms.
+
+internal/domain/room/
+Room state domain model.
 
 internal/store/
 State persistence (memory or database).

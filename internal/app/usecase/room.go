@@ -17,8 +17,9 @@ var ErrNotInRoom = errors.New("player not in room")
 const rotationDiffSlack = 50
 
 type RoomService struct {
-	store store.Store
-	now   func() time.Time
+	store    store.Store
+	roomRepo RoomRepository
+	now      func() time.Time
 }
 
 type WhoAmIInfo struct {
@@ -43,6 +44,10 @@ func (u *RoomService) SetStore(s store.Store) {
 	if s != nil {
 		u.store = s
 	}
+}
+
+func (u *RoomService) SetRoomRepository(repo RoomRepository) {
+	u.roomRepo = repo
 }
 
 func (u *RoomService) Join(guildID, channelID string, player domain.Player) (bool, bool, error) {
@@ -150,9 +155,9 @@ func (u *RoomService) Next(guildID, channelID string, settings domain.RoomSettin
 }
 
 func (u *RoomService) WhoAmI(guildID, channelID, userID string) (WhoAmIInfo, error) {
-	state, ok := u.store.GetState(guildID, channelID)
-	if !ok {
-		return WhoAmIInfo{}, ErrNotInRoom
+	state, err := u.loadRoomState(guildID, channelID)
+	if err != nil {
+		return WhoAmIInfo{}, err
 	}
 	var player *domain.Player
 	for i := range state.Players {
@@ -190,7 +195,7 @@ func (u *RoomService) Export(guildID, channelID, scope string, limit int) ([]sto
 }
 
 func (u *RoomService) RunMatchWithPlayers(guildID, channelID string, players []domain.Player, settings domain.RoomSettings, seed int64) (domain.MatchResult, error) {
-	state, _ := u.store.GetState(guildID, channelID)
+	state, _ := u.loadRoomState(guildID, channelID)
 	penaltyFn := combinedPenaltyFunc(state, settings, u.now().Unix())
 	effectivePlayers := applyRatings(players, u.store.GetPlayerStats(playerIDs(players)))
 
@@ -200,6 +205,18 @@ func (u *RoomService) RunMatchWithPlayers(guildID, channelID string, players []d
 	}
 	u.store.SaveLastMatch(guildID, channelID, seed, players, result)
 	return result, nil
+}
+
+func (u *RoomService) loadRoomState(guildID, channelID string) (store.RoomState, error) {
+	if u.roomRepo != nil {
+		state, err := u.roomRepo.Load(guildID, channelID)
+		if err != nil {
+			return store.RoomState{}, err
+		}
+		return state, nil
+	}
+	state, _ := u.store.GetState(guildID, channelID)
+	return state, nil
 }
 
 func SameTeamPenalty(last domain.MatchResult, result domain.MatchResult) int {
