@@ -48,7 +48,7 @@ internal/domain/room/
 Room state domain model.
 
 internal/store/
-State persistence (memory or database).
+Store interfaces and in-memory implementation.
 
 internal/util/
 Formatting and helper functions.
