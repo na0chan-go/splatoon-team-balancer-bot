@@ -9,6 +9,38 @@ Splatoon3 のプライベートマッチでチーム分けを自動化する Dis
 
 手動でのチーム分けの手間や「戦力差による不公平」を減らすことを目的としています。
 
+## Quickstart
+
+### 1) 環境変数を設定
+
+```bash
+export DISCORD_TOKEN=your_token
+export DISCORD_APP_ID=123456789012345678
+export DISCORD_GUILD_ID=123456789012345678
+export SQLITE_PATH=./data.db
+```
+
+### 2-A) ローカル実行（Go）
+
+```bash
+go run cmd/bot/main.go
+```
+
+### 2-B) Docker実行（永続化あり）
+
+```bash
+docker build -t splatoon-team-balancer-bot .
+docker run --rm \
+  -e DISCORD_TOKEN="$DISCORD_TOKEN" \
+  -e DISCORD_APP_ID="$DISCORD_APP_ID" \
+  -e DISCORD_GUILD_ID="$DISCORD_GUILD_ID" \
+  -e SQLITE_PATH=/data/db.sqlite \
+  -v "$(pwd)/data:/data" \
+  splatoon-team-balancer-bot
+```
+
+---
+
 ## ポイント
 
 - **10C8 × (8C4 / 2) = 1575** の全探索で最適解を保証
@@ -28,6 +60,8 @@ Splatoon3 のプライベートマッチでチーム分けを自動化する Dis
 
 - [Architecture](docs/ARCHITECTURE.md)
 - [Decisions](docs/DECISIONS.md)
+- [Releasing](docs/RELEASING.md)
+- [Changelog](CHANGELOG.md)
 
 ---
 
@@ -164,21 +198,16 @@ Go
 
 GitHubから取得
 
-必要な環境変数を設定
+## 環境変数
 
-- `DISCORD_TOKEN`: Bot token（`Bot ` プレフィックスは不要）
-- `DISCORD_APP_ID`: Discord Application ID
-- `DISCORD_GUILD_ID`: コマンドを登録するGuild ID（設定時はguild登録のみ、未設定時はglobal登録のみ）
-- `SQLITE_PATH`: SQLite DBファイルパス（省略時 `./data.db`）
+| 変数名 | 必須 | デフォルト | 説明 |
+| --- | --- | --- | --- |
+| `DISCORD_TOKEN` | 必須 | なし | Bot token（`Bot ` プレフィックス不要） |
+| `DISCORD_APP_ID` | 必須 | なし | Discord Application ID |
+| `DISCORD_GUILD_ID` | 任意 | 空 | 設定時はguild登録のみ。未設定時はglobal登録のみ |
+| `SQLITE_PATH` | 任意 | `./data.db` | SQLite DBファイルパス |
 
 開発中は `DISCORD_GUILD_ID` の設定を推奨します（guild command は反映が速い）。
-
-```bash
-export DISCORD_TOKEN=your_token
-export DISCORD_APP_ID=123456789012345678
-export DISCORD_GUILD_ID=123456789012345678
-export SQLITE_PATH=./data.db
-```
 
 Botを起動
 
@@ -205,15 +234,15 @@ docker run --rm \
   -e DISCORD_TOKEN=your_token \
   -e DISCORD_APP_ID=123456789012345678 \
   -e DISCORD_GUILD_ID=123456789012345678 \
-  -e SQLITE_PATH=/app/data.db \
-  -v "$(pwd)/data:/app" \
+  -e SQLITE_PATH=/data/db.sqlite \
+  -v "$(pwd)/data:/data" \
   splatoon-team-balancer-bot
 ```
 
 補足
 
 - 実行バイナリはコンテナ内 `/app/bot`
-- `SQLITE_PATH` 未指定時は `./data.db`（= `/app/data.db`）
+- 永続化する場合は `-v "$(pwd)/data:/data"` と `SQLITE_PATH=/data/db.sqlite` を推奨
 
 ---
 
