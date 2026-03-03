@@ -32,8 +32,6 @@ var ErrNoLastMake = usecase.ErrNoLastMake
 var ErrNoPreviousMatch = usecase.ErrNoPreviousMatch
 var ErrNotInRoom = usecase.ErrNotInRoom
 
-const rotationDiffSlack = 50
-
 func SetStore(s store.Store) {
 	if s == nil {
 		return
