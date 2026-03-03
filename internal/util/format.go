@@ -37,15 +37,17 @@ func MatchResultEmbed(result domain.MatchResult) *discordgo.MessageEmbed {
 	}
 }
 
-func WhoAmIEmbed(name string, xpower int, pauseRemaining int, participationCount int, spectatorCount int) *discordgo.MessageEmbed {
+func WhoAmIEmbed(name string, xpower int, pauseRemaining int, participationCount int, spectatorCount int, ratingDelta int, wins int, losses int) *discordgo.MessageEmbed {
 	return &discordgo.MessageEmbed{
 		Title: "Who Am I",
 		Fields: []*discordgo.MessageEmbedField{
 			{Name: "Player", Value: name, Inline: true},
 			{Name: "XPower", Value: fmt.Sprintf("%d", xpower), Inline: true},
+			{Name: "Rating Delta", Value: fmt.Sprintf("%d", ratingDelta), Inline: true},
 			{Name: "Pause Remaining", Value: fmt.Sprintf("%d", pauseRemaining), Inline: true},
 			{Name: "Past Participation", Value: fmt.Sprintf("%d", participationCount), Inline: true},
 			{Name: "Spectator Count", Value: fmt.Sprintf("%d", spectatorCount), Inline: true},
+			{Name: "Wins/Losses", Value: fmt.Sprintf("%d/%d", wins, losses), Inline: true},
 		},
 	}
 }

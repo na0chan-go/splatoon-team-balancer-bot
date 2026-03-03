@@ -192,14 +192,17 @@ func TestMemoryStoreRecordMatchResultUpdatesStatsAndClamp(t *testing.T) {
 	}
 
 	stats := s.GetPlayerStats([]string{"u1", "u5"})
-	if got := stats["u1"].Rating; got != 200 {
-		t.Fatalf("expected winner rating clamped to 200, got %d", got)
+	if got := stats["u1"].RatingDelta; got != 200 {
+		t.Fatalf("expected winner rating delta clamped to 200, got %d", got)
 	}
-	if got := stats["u5"].Rating; got != -200 {
-		t.Fatalf("expected loser rating clamped to -200, got %d", got)
+	if got := stats["u5"].RatingDelta; got != -200 {
+		t.Fatalf("expected loser rating delta clamped to -200, got %d", got)
 	}
 	if stats["u1"].Wins == 0 || stats["u5"].Losses == 0 {
 		t.Fatalf("expected wins/losses to be updated: %+v", stats)
+	}
+	if stats["u1"].LastPlayedAt == 0 || stats["u5"].LastPlayedAt == 0 {
+		t.Fatalf("expected last_played_at to be set: %+v", stats)
 	}
 }
 

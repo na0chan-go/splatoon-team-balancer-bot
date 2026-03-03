@@ -386,14 +386,16 @@ func (s *MemoryStore) RecordMatchResult(guildID, channelID, winnerTeam string, r
 		st := s.playerStats[p.ID]
 		st.UserID = p.ID
 		st.Wins++
-		st.Rating = clampRating(st.Rating + 10)
+		st.RatingDelta = domain.NextRatingDelta(st.RatingDelta, true)
+		st.LastPlayedAt = time.Now().Unix()
 		s.playerStats[p.ID] = st
 	}
 	for _, p := range losers {
 		st := s.playerStats[p.ID]
 		st.UserID = p.ID
 		st.Losses++
-		st.Rating = clampRating(st.Rating - 10)
+		st.RatingDelta = domain.NextRatingDelta(st.RatingDelta, false)
+		st.LastPlayedAt = time.Now().Unix()
 		s.playerStats[p.ID] = st
 	}
 	return nil
@@ -475,17 +477,6 @@ func copyParticipationCounts(in map[string]int) map[string]int {
 		out[k] = v
 	}
 	return out
-}
-
-func clampRating(r int) int {
-	switch {
-	case r < -200:
-		return -200
-	case r > 200:
-		return 200
-	default:
-		return r
-	}
 }
 
 func (s *MemoryStore) GetExportData(guildID, channelID, scope string, limit int) ([]MatchRecord, []PlayerStat, error) {

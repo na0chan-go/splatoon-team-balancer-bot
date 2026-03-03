@@ -362,12 +362,23 @@ CREATE TABLE IF NOT EXISTS room_states (
 CREATE TABLE IF NOT EXISTS player_stats (
   user_id TEXT PRIMARY KEY,
   rating INTEGER NOT NULL DEFAULT 0,
+  rating_delta INTEGER NOT NULL DEFAULT 0,
   wins INTEGER NOT NULL DEFAULT 0,
-  losses INTEGER NOT NULL DEFAULT 0
+  losses INTEGER NOT NULL DEFAULT 0,
+  last_played_at INTEGER NOT NULL DEFAULT 0
 );`
 	if _, err := s.db.Exec(playerStatsSchema); err != nil {
 		return fmt.Errorf("failed to initialize player_stats schema: %w", err)
 	}
+	_, err = s.db.Exec(`ALTER TABLE player_stats ADD COLUMN rating_delta INTEGER NOT NULL DEFAULT 0`)
+	if err != nil && !strings.Contains(strings.ToLower(err.Error()), "duplicate column name") {
+		return fmt.Errorf("failed to migrate player_stats rating_delta: %w", err)
+	}
+	_, err = s.db.Exec(`ALTER TABLE player_stats ADD COLUMN last_played_at INTEGER NOT NULL DEFAULT 0`)
+	if err != nil && !strings.Contains(strings.ToLower(err.Error()), "duplicate column name") {
+		return fmt.Errorf("failed to migrate player_stats last_played_at: %w", err)
+	}
+	_, _ = s.db.Exec(`UPDATE player_stats SET rating_delta = rating WHERE rating_delta = 0 AND rating != 0`)
 
 	const matchesSchema = `
 CREATE TABLE IF NOT EXISTS matches (
@@ -570,7 +581,7 @@ func (s *SQLiteStore) GetPlayerStats(userIDs []string) map[string]PlayerStat {
 
 	query, args := inClause("user_id", userIDs)
 	rows, err := s.db.Query(
-		fmt.Sprintf(`SELECT user_id, rating, wins, losses FROM player_stats WHERE %s`, query),
+		fmt.Sprintf(`SELECT user_id, COALESCE(rating_delta, rating, 0), wins, losses, COALESCE(last_played_at, 0) FROM player_stats WHERE %s`, query),
 		args...,
 	)
 	if err != nil {
@@ -580,10 +591,10 @@ func (s *SQLiteStore) GetPlayerStats(userIDs []string) map[string]PlayerStat {
 
 	for rows.Next() {
 		var st PlayerStat
-		if err := rows.Scan(&st.UserID, &st.Rating, &st.Wins, &st.Losses); err != nil {
+		if err := rows.Scan(&st.UserID, &st.RatingDelta, &st.Wins, &st.Losses, &st.LastPlayedAt); err != nil {
 			continue
 		}
-		st.Rating = clampRating(st.Rating)
+		st.RatingDelta = domain.ClampRatingDelta(st.RatingDelta)
 		stats[st.UserID] = st
 	}
 	return stats
@@ -741,7 +752,7 @@ func (s *SQLiteStore) GetExportData(guildID, channelID, scope string, limit int)
 	if len(userIDs) > 0 {
 		query, args := inClause("user_id", userIDs)
 		statRows, err := s.db.Query(
-			fmt.Sprintf(`SELECT user_id, rating, wins, losses FROM player_stats WHERE %s`, query),
+			fmt.Sprintf(`SELECT user_id, COALESCE(rating_delta, rating, 0), wins, losses, COALESCE(last_played_at, 0) FROM player_stats WHERE %s`, query),
 			args...,
 		)
 		if err != nil {
@@ -751,18 +762,18 @@ func (s *SQLiteStore) GetExportData(guildID, channelID, scope string, limit int)
 
 		for statRows.Next() {
 			var st PlayerStat
-			if err := statRows.Scan(&st.UserID, &st.Rating, &st.Wins, &st.Losses); err != nil {
+			if err := statRows.Scan(&st.UserID, &st.RatingDelta, &st.Wins, &st.Losses, &st.LastPlayedAt); err != nil {
 				return nil, nil, err
 			}
-			st.Rating = clampRating(st.Rating)
+			st.RatingDelta = domain.ClampRatingDelta(st.RatingDelta)
 			stats = append(stats, st)
 		}
 	}
 	sort.Slice(stats, func(i, j int) bool {
-		if stats[i].Rating == stats[j].Rating {
+		if stats[i].RatingDelta == stats[j].RatingDelta {
 			return stats[i].UserID < stats[j].UserID
 		}
-		return stats[i].Rating > stats[j].Rating
+		return stats[i].RatingDelta > stats[j].RatingDelta
 	})
 	return matches, stats, nil
 }
@@ -778,38 +789,45 @@ func inClause(column string, values []string) (string, []any) {
 }
 
 func updatePlayerStat(tx *sql.Tx, userID string, won bool) error {
-	var rating, wins, losses int
+	var ratingDelta, wins, losses int
+	var lastPlayedAt int64
 	err := tx.QueryRow(
-		`SELECT rating, wins, losses FROM player_stats WHERE user_id = ?`,
+		`SELECT COALESCE(rating_delta, rating, 0), wins, losses, COALESCE(last_played_at, 0) FROM player_stats WHERE user_id = ?`,
 		userID,
-	).Scan(&rating, &wins, &losses)
+	).Scan(&ratingDelta, &wins, &losses, &lastPlayedAt)
 	if errors.Is(err, sql.ErrNoRows) {
-		rating = 0
+		ratingDelta = 0
 		wins = 0
 		losses = 0
+		lastPlayedAt = 0
 	} else if err != nil {
 		return err
 	}
 
 	if won {
 		wins++
-		rating = clampRating(rating + 10)
+		ratingDelta = domain.NextRatingDelta(ratingDelta, true)
 	} else {
 		losses++
-		rating = clampRating(rating - 10)
+		ratingDelta = domain.NextRatingDelta(ratingDelta, false)
 	}
+	lastPlayedAt = time.Now().Unix()
 
 	_, err = tx.Exec(
-		`INSERT INTO player_stats (user_id, rating, wins, losses)
-		 VALUES (?, ?, ?, ?)
+		`INSERT INTO player_stats (user_id, rating, rating_delta, wins, losses, last_played_at)
+		 VALUES (?, ?, ?, ?, ?, ?)
 		 ON CONFLICT(user_id) DO UPDATE SET
 		   rating = excluded.rating,
+		   rating_delta = excluded.rating_delta,
 		   wins = excluded.wins,
-		   losses = excluded.losses`,
+		   losses = excluded.losses,
+		   last_played_at = excluded.last_played_at`,
 		userID,
-		rating,
+		ratingDelta,
+		ratingDelta,
 		wins,
 		losses,
+		lastPlayedAt,
 	)
 	return err
 }

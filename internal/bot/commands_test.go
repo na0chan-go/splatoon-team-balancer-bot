@@ -250,6 +250,9 @@ func TestWhoAmIStateReturnsExpectedFields(t *testing.T) {
 		Spectators: []domain.Player{players[0]},
 	}
 	roomStore.SaveLastMatch("g1", "c1", 1, players, result)
+	if err := roomStore.RecordMatchResult("g1", "c1", "alpha", result); err != nil {
+		t.Fatalf("RecordMatchResult failed: %v", err)
+	}
 
 	info, err := whoAmIState("g1", "c1", "u1")
 	if err != nil {
@@ -264,6 +267,9 @@ func TestWhoAmIStateReturnsExpectedFields(t *testing.T) {
 	if info.ParticipationCount != 0 {
 		t.Fatalf("expected participation count 0, got %d", info.ParticipationCount)
 	}
+	if info.RatingDelta != 0 || info.Wins != 0 || info.Losses != 0 {
+		t.Fatalf("expected spectator stats unchanged, got %+v", info)
+	}
 
 	info2, err := whoAmIState("g1", "c1", "u2")
 	if err != nil {
@@ -271,6 +277,9 @@ func TestWhoAmIStateReturnsExpectedFields(t *testing.T) {
 	}
 	if info2.ParticipationCount != 1 {
 		t.Fatalf("expected participation count 1 for u2, got %d", info2.ParticipationCount)
+	}
+	if info2.RatingDelta != 10 || info2.Wins != 1 || info2.Losses != 0 {
+		t.Fatalf("expected u2 stats to include win and +10 delta, got %+v", info2)
 	}
 }
 

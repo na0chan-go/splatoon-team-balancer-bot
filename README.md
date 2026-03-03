@@ -32,7 +32,7 @@ Splatoon3 のプライベートマッチでチーム分けを自動化する Dis
 - 同条件で再計算可能（reroll）
 - 観戦ローテーション（spectator_count / last_spectated_at を利用）
 - match history tracking（/result で勝敗を保存）
-- dynamic power adjustment（declared_xpower + rating でマッチング）
+- dynamic power adjustment（declared_xpower + rating_delta でマッチング）
 - 連打対策（room単位ロック + /make,/next の3秒クールダウン）
 
 ---
@@ -244,7 +244,7 @@ docker run --rm \
 一時離脱中の一覧を表示
 
 /whoami
-自分の状態（pause残り・参加回数・観戦回数・XPower）を表示
+自分の状態（pause残り・参加回数・観戦回数・XPower・rating_delta・wins/losses）を表示
 
 /undo
 直前の /make または /next の状態に戻す
@@ -253,7 +253,7 @@ docker run --rm \
 別の最適解を再計算
 
 /result <alpha|bravo>
-試合結果を記録してratingを更新
+試合結果を記録してrating_deltaを更新（自己申告XPowerの補正に利用）
 
 /export type:(csv|json) scope:(room|all) limit:int
 試合履歴とプレイヤー統計をファイル出力

@@ -3,10 +3,11 @@ package store
 import "github.com/na0chan-go/splatoon-team-balancer-bot/internal/domain"
 
 type PlayerStat struct {
-	UserID string
-	Rating int
-	Wins   int
-	Losses int
+	UserID       string `json:"user_id"`
+	RatingDelta  int    `json:"rating_delta"`
+	Wins         int    `json:"wins"`
+	Losses       int    `json:"losses"`
+	LastPlayedAt int64  `json:"last_played_at"`
 }
 
 type MatchRecord struct {

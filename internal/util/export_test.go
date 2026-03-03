@@ -25,7 +25,7 @@ func TestBuildExportFilesCSVHeadersAndColumns(t *testing.T) {
 			CreatedAt:  1000,
 		},
 	}
-	stats := []store.PlayerStat{{UserID: "u1", Rating: 10, Wins: 1, Losses: 0}}
+	stats := []store.PlayerStat{{UserID: "u1", RatingDelta: 10, Wins: 1, Losses: 0, LastPlayedAt: 1000}}
 
 	files, err := BuildExportFiles("csv", matches, stats)
 	if err != nil {
@@ -61,14 +61,14 @@ func TestBuildExportFilesCSVHeadersAndColumns(t *testing.T) {
 	if len(statsRows) < 2 {
 		t.Fatalf("expected header + 1 row, got %d", len(statsRows))
 	}
-	if got := len(statsRows[0]); got != 4 {
-		t.Fatalf("expected stats header columns 4, got %d", got)
+	if got := len(statsRows[0]); got != 5 {
+		t.Fatalf("expected stats header columns 5, got %d", got)
 	}
 	if statsRows[0][0] != "user_id" {
 		t.Fatalf("unexpected stats header: %+v", statsRows[0])
 	}
-	if got := len(statsRows[1]); got != 4 {
-		t.Fatalf("expected stats row columns 4, got %d", got)
+	if got := len(statsRows[1]); got != 5 {
+		t.Fatalf("expected stats row columns 5, got %d", got)
 	}
 }
 

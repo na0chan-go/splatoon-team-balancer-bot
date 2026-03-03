@@ -86,16 +86,17 @@ func buildMatchesCSV(matches []store.MatchRecord) ([]byte, error) {
 func buildStatsCSV(stats []store.PlayerStat) ([]byte, error) {
 	var buf bytes.Buffer
 	w := csv.NewWriter(&buf)
-	header := []string{"user_id", "rating", "wins", "losses"}
+	header := []string{"user_id", "rating_delta", "wins", "losses", "last_played_at"}
 	if err := w.Write(header); err != nil {
 		return nil, err
 	}
 	for _, s := range stats {
 		row := []string{
 			s.UserID,
-			strconv.Itoa(s.Rating),
+			strconv.Itoa(s.RatingDelta),
 			strconv.Itoa(s.Wins),
 			strconv.Itoa(s.Losses),
+			strconv.FormatInt(s.LastPlayedAt, 10),
 		}
 		if err := w.Write(row); err != nil {
 			return nil, err

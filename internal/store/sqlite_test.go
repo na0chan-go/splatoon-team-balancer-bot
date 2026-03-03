@@ -167,11 +167,14 @@ func TestSQLiteStoreRecordMatchResultUpdatesStatsAndHistory(t *testing.T) {
 	}
 
 	stats := s.GetPlayerStats([]string{"u1", "u5"})
-	if got := stats["u1"].Rating; got != 10 {
-		t.Fatalf("expected winner rating 10, got %d", got)
+	if got := stats["u1"].RatingDelta; got != 10 {
+		t.Fatalf("expected winner rating delta 10, got %d", got)
 	}
-	if got := stats["u5"].Rating; got != -10 {
-		t.Fatalf("expected loser rating -10, got %d", got)
+	if got := stats["u5"].RatingDelta; got != -10 {
+		t.Fatalf("expected loser rating delta -10, got %d", got)
+	}
+	if stats["u1"].LastPlayedAt == 0 || stats["u5"].LastPlayedAt == 0 {
+		t.Fatalf("expected last_played_at to be set: %+v", stats)
 	}
 
 	var matchCount int

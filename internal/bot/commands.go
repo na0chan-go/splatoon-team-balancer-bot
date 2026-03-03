@@ -612,7 +612,16 @@ func handleWhoAmI(s *discordgo.Session, ic *discordgo.InteractionCreate) {
 		return
 	}
 
-	embed := util.WhoAmIEmbed(info.Name, info.XPower, info.PauseRemaining, info.ParticipationCount, info.SpectatorCount)
+	embed := util.WhoAmIEmbed(
+		info.Name,
+		info.XPower,
+		info.PauseRemaining,
+		info.ParticipationCount,
+		info.SpectatorCount,
+		info.RatingDelta,
+		info.Wins,
+		info.Losses,
+	)
 	respondEmbed(s, ic, embed, false)
 }
 
@@ -979,6 +988,9 @@ type whoAmIInfo struct {
 	PauseRemaining     int
 	ParticipationCount int
 	SpectatorCount     int
+	RatingDelta        int
+	Wins               int
+	Losses             int
 }
 
 type pauseReactionTarget struct {
@@ -1085,6 +1097,7 @@ func whoAmIState(guildID, channelID, userID string) (whoAmIInfo, error) {
 	if player == nil {
 		return whoAmIInfo{}, ErrNotInRoom
 	}
+	stats := roomStore.GetPlayerStats([]string{userID})[userID]
 
 	return whoAmIInfo{
 		Name:               player.Name,
@@ -1092,6 +1105,9 @@ func whoAmIState(guildID, channelID, userID string) (whoAmIInfo, error) {
 		PauseRemaining:     player.PauseRemaining,
 		ParticipationCount: state.ParticipationCounts[userID],
 		SpectatorCount:     state.SpectatorHistory[userID].SpectatorCount,
+		RatingDelta:        stats.RatingDelta,
+		Wins:               stats.Wins,
+		Losses:             stats.Losses,
 	}, nil
 }
 
@@ -1255,14 +1271,7 @@ func applyRatings(players []domain.Player, stats map[string]store.PlayerStat) []
 	effective := make([]domain.Player, len(players))
 	for i, p := range players {
 		st := stats[p.ID]
-		rating := st.Rating
-		if rating < -200 {
-			rating = -200
-		}
-		if rating > 200 {
-			rating = 200
-		}
-		p.XPower += rating
+		p.XPower += domain.ClampRatingDelta(st.RatingDelta)
 		effective[i] = p
 	}
 	return effective
