@@ -242,3 +242,43 @@ func TestSQLiteStoreUndoRoomStatePersists(t *testing.T) {
 		t.Fatalf("expected players restored to 9, got %d", got)
 	}
 }
+
+func TestSQLiteStoreTryMarkOnboardingShownPersists(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+	s, err := NewSQLiteStore(dbPath)
+	if err != nil {
+		t.Fatalf("NewSQLiteStore failed: %v", err)
+	}
+
+	first, err := s.TryMarkOnboardingShown("g1", "c1")
+	if err != nil {
+		t.Fatalf("first TryMarkOnboardingShown failed: %v", err)
+	}
+	if !first {
+		t.Fatal("expected first mark to return true")
+	}
+	second, err := s.TryMarkOnboardingShown("g1", "c1")
+	if err != nil {
+		t.Fatalf("second TryMarkOnboardingShown failed: %v", err)
+	}
+	if second {
+		t.Fatal("expected second mark to return false")
+	}
+	if err := s.Close(); err != nil {
+		t.Fatalf("close failed: %v", err)
+	}
+
+	s2, err := NewSQLiteStore(dbPath)
+	if err != nil {
+		t.Fatalf("reopen failed: %v", err)
+	}
+	defer s2.Close()
+
+	state, ok := s2.GetState("g1", "c1")
+	if !ok {
+		t.Fatal("expected persisted state")
+	}
+	if !state.OnboardingShown {
+		t.Fatal("expected onboarding flag to persist as true")
+	}
+}

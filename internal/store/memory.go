@@ -28,6 +28,7 @@ type RoomState struct {
 	LastPlayersSnapshot []domain.Player
 	SpectatorHistory    map[string]SpectatorHistory
 	ParticipationCounts map[string]int
+	OnboardingShown     bool
 	PreviousState       *RoomStateSnapshot
 }
 
@@ -43,6 +44,7 @@ type RoomStateSnapshot struct {
 	LastPlayersSnapshot []domain.Player             `json:"last_players_snapshot"`
 	SpectatorHistory    map[string]SpectatorHistory `json:"spectator_history"`
 	ParticipationCounts map[string]int              `json:"participation_counts"`
+	OnboardingShown     bool                        `json:"onboarding_shown"`
 }
 
 type MemoryStore struct {
@@ -113,6 +115,20 @@ func (s *MemoryStore) Leave(guildID, channelID, userID string) error {
 	state.Players = append(state.Players[:index], state.Players[index+1:]...)
 	s.rooms[key] = state
 	return nil
+}
+
+func (s *MemoryStore) TryMarkOnboardingShown(guildID, channelID string) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	key := roomKey(guildID, channelID)
+	state := s.rooms[key]
+	if state.OnboardingShown {
+		return false, nil
+	}
+	state.OnboardingShown = true
+	s.rooms[key] = state
+	return true, nil
 }
 
 func (s *MemoryStore) SaveLastMatch(guildID, channelID string, seed int64, players []domain.Player, result domain.MatchResult) {
@@ -198,6 +214,7 @@ func (s *MemoryStore) GetState(guildID, channelID string) (RoomState, bool) {
 		LastPlayersSnapshot: copyPlayers(state.LastPlayersSnapshot),
 		SpectatorHistory:    copySpectatorHistory(state.SpectatorHistory),
 		ParticipationCounts: copyParticipationCounts(state.ParticipationCounts),
+		OnboardingShown:     state.OnboardingShown,
 		PreviousState:       copySnapshot(state.PreviousState),
 	}, true
 }
@@ -392,6 +409,7 @@ func snapshotFromState(state RoomState) RoomStateSnapshot {
 		LastPlayersSnapshot: copyPlayers(state.LastPlayersSnapshot),
 		SpectatorHistory:    copySpectatorHistory(state.SpectatorHistory),
 		ParticipationCounts: copyParticipationCounts(state.ParticipationCounts),
+		OnboardingShown:     state.OnboardingShown,
 	}
 }
 
@@ -403,6 +421,7 @@ func stateFromSnapshot(snapshot RoomStateSnapshot) RoomState {
 		LastPlayersSnapshot: copyPlayers(snapshot.LastPlayersSnapshot),
 		SpectatorHistory:    copySpectatorHistory(snapshot.SpectatorHistory),
 		ParticipationCounts: copyParticipationCounts(snapshot.ParticipationCounts),
+		OnboardingShown:     snapshot.OnboardingShown,
 	}
 }
 

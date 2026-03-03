@@ -112,6 +112,24 @@ func (s *SQLiteStore) Leave(guildID, channelID, userID string) error {
 	return s.upsertStateLocked(guildID, channelID, state)
 }
 
+func (s *SQLiteStore) TryMarkOnboardingShown(guildID, channelID string) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	state, _, err := s.getRoomStateLocked(guildID, channelID)
+	if err != nil {
+		return false, err
+	}
+	if state.OnboardingShown {
+		return false, nil
+	}
+	state.OnboardingShown = true
+	if err := s.upsertStateLocked(guildID, channelID, state); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
 func (s *SQLiteStore) List(guildID, channelID string) []domain.Player {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -247,6 +265,7 @@ func (s *SQLiteStore) GetState(guildID, channelID string) (RoomState, bool) {
 		LastPlayersSnapshot: copyPlayers(state.LastPlayersSnapshot),
 		SpectatorHistory:    copySpectatorHistory(state.SpectatorHistory),
 		ParticipationCounts: copyParticipationCounts(state.ParticipationCounts),
+		OnboardingShown:     state.OnboardingShown,
 	}, true
 }
 
@@ -271,6 +290,7 @@ CREATE TABLE IF NOT EXISTS room_states (
   last_players_snapshot_json TEXT NOT NULL,
   spectator_history_json TEXT NOT NULL DEFAULT '{}',
   participation_counts_json TEXT NOT NULL DEFAULT '{}',
+  onboarding_shown INTEGER NOT NULL DEFAULT 0,
   previous_state_json TEXT NOT NULL DEFAULT '',
   PRIMARY KEY (guild_id, channel_id)
 );`
@@ -289,6 +309,10 @@ CREATE TABLE IF NOT EXISTS room_states (
 	_, err = s.db.Exec(`ALTER TABLE room_states ADD COLUMN participation_counts_json TEXT NOT NULL DEFAULT '{}'`)
 	if err != nil && !strings.Contains(strings.ToLower(err.Error()), "duplicate column name") {
 		return fmt.Errorf("failed to migrate sqlite schema for participation counts: %w", err)
+	}
+	_, err = s.db.Exec(`ALTER TABLE room_states ADD COLUMN onboarding_shown INTEGER NOT NULL DEFAULT 0`)
+	if err != nil && !strings.Contains(strings.ToLower(err.Error()), "duplicate column name") {
+		return fmt.Errorf("failed to migrate sqlite schema for onboarding flag: %w", err)
 	}
 
 	const playerStatsSchema = `
@@ -330,13 +354,14 @@ func (s *SQLiteStore) getRoomStateLocked(guildID, channelID string) (RoomState, 
 	var lastPlayersSnapshotJSON string
 	var spectatorHistoryJSON string
 	var participationCountsJSON string
+	var onboardingShown int
 	var previousStateJSON string
 
 	err := s.db.QueryRow(
-		`SELECT players_json, last_result_json, last_seed, last_players_snapshot_json, spectator_history_json, participation_counts_json, previous_state_json
+		`SELECT players_json, last_result_json, last_seed, last_players_snapshot_json, spectator_history_json, participation_counts_json, onboarding_shown, previous_state_json
 		 FROM room_states WHERE guild_id = ? AND channel_id = ?`,
 		guildID, channelID,
-	).Scan(&playersJSON, &lastResultJSON, &lastSeed, &lastPlayersSnapshotJSON, &spectatorHistoryJSON, &participationCountsJSON, &previousStateJSON)
+	).Scan(&playersJSON, &lastResultJSON, &lastSeed, &lastPlayersSnapshotJSON, &spectatorHistoryJSON, &participationCountsJSON, &onboardingShown, &previousStateJSON)
 	if errors.Is(err, sql.ErrNoRows) {
 		return RoomState{}, false, nil
 	}
@@ -368,6 +393,7 @@ func (s *SQLiteStore) getRoomStateLocked(guildID, channelID string) (RoomState, 
 		state.PreviousState = &prev
 	}
 	state.LastSeed = lastSeed
+	state.OnboardingShown = onboardingShown != 0
 
 	return state, true, nil
 }
@@ -404,8 +430,8 @@ func (s *SQLiteStore) upsertStateLocked(guildID, channelID string, state RoomSta
 
 	_, err = s.db.Exec(
 		`INSERT INTO room_states
-		  (guild_id, channel_id, players_json, last_result_json, last_seed, last_players_snapshot_json, spectator_history_json, participation_counts_json, previous_state_json)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+		  (guild_id, channel_id, players_json, last_result_json, last_seed, last_players_snapshot_json, spectator_history_json, participation_counts_json, onboarding_shown, previous_state_json)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		 ON CONFLICT(guild_id, channel_id) DO UPDATE SET
 		   players_json = excluded.players_json,
 		   last_result_json = excluded.last_result_json,
@@ -413,6 +439,7 @@ func (s *SQLiteStore) upsertStateLocked(guildID, channelID string, state RoomSta
 		   last_players_snapshot_json = excluded.last_players_snapshot_json,
 		   spectator_history_json = excluded.spectator_history_json,
 		   participation_counts_json = excluded.participation_counts_json,
+		   onboarding_shown = excluded.onboarding_shown,
 		   previous_state_json = excluded.previous_state_json`,
 		guildID,
 		channelID,
@@ -422,6 +449,7 @@ func (s *SQLiteStore) upsertStateLocked(guildID, channelID string, state RoomSta
 		string(lastPlayersSnapshotJSON),
 		string(spectatorHistoryJSON),
 		string(participationCountsJSON),
+		boolToInt(state.OnboardingShown),
 		previousStateJSON,
 	)
 	if err != nil {
@@ -619,4 +647,11 @@ func updatePlayerStat(tx *sql.Tx, userID string, won bool) error {
 		losses,
 	)
 	return err
+}
+
+func boolToInt(v bool) int {
+	if v {
+		return 1
+	}
+	return 0
 }

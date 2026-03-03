@@ -50,6 +50,47 @@ func WhoAmIEmbed(name string, xpower int, pauseRemaining int, participationCount
 	}
 }
 
+func HelpEmbed() *discordgo.MessageEmbed {
+	return &discordgo.MessageEmbed{
+		Title: "Team Balancer Help",
+		Fields: []*discordgo.MessageEmbedField{
+			{
+				Name: "最短フロー",
+				Value: strings.Join([]string{
+					"- `/join xpower` で参加",
+					"- `/make` で初回のチーム分け",
+					"- `/next` で次試合を作成",
+				}, "\n"),
+			},
+			{
+				Name: "よく使う補助コマンド",
+				Value: strings.Join([]string{
+					"- `/pause matches:3 reason:トイレ`",
+					"- `/resume` で復帰",
+					"- `/undo` で直前の /make /next を取り消し",
+				}, "\n"),
+			},
+		},
+	}
+}
+
+func OnboardingEmbed() *discordgo.MessageEmbed {
+	return &discordgo.MessageEmbed{
+		Title: "Team Balancer Onboarding",
+		Description: strings.Join([]string{
+			"この部屋での基本操作",
+			"`/join -> /make -> /next`",
+			"困ったら `/help` を実行してください。",
+		}, "\n"),
+		Fields: []*discordgo.MessageEmbedField{
+			{
+				Name:  "運用例",
+				Value: "- 数試合抜ける: `/pause matches:3 reason:トイレ`\n- 戻る: `/resume`",
+			},
+		},
+	}
+}
+
 func formatPlayers(players []domain.Player) string {
 	if len(players) == 0 {
 		return "- none"

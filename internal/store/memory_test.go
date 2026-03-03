@@ -249,3 +249,31 @@ func TestMemoryStoreUndoRoomState(t *testing.T) {
 		t.Fatalf("expected players restored to 9, got %d", got)
 	}
 }
+
+func TestMemoryStoreTryMarkOnboardingShown(t *testing.T) {
+	s := NewMemoryStore()
+
+	first, err := s.TryMarkOnboardingShown("g1", "c1")
+	if err != nil {
+		t.Fatalf("TryMarkOnboardingShown first failed: %v", err)
+	}
+	if !first {
+		t.Fatal("expected first mark to return true")
+	}
+
+	second, err := s.TryMarkOnboardingShown("g1", "c1")
+	if err != nil {
+		t.Fatalf("TryMarkOnboardingShown second failed: %v", err)
+	}
+	if second {
+		t.Fatal("expected second mark to return false")
+	}
+
+	state, ok := s.GetState("g1", "c1")
+	if !ok {
+		t.Fatal("expected state to exist")
+	}
+	if !state.OnboardingShown {
+		t.Fatal("expected onboarding flag to be true")
+	}
+}

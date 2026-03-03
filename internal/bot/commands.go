@@ -38,6 +38,10 @@ var commands = []*discordgo.ApplicationCommand{
 		Description: "ping to bot and receive pong",
 	},
 	{
+		Name:        "help",
+		Description: "show usage guide",
+	},
+	{
 		Name:        "join",
 		Description: "join current room with your xpower",
 		Options: []*discordgo.ApplicationCommandOption{
@@ -156,6 +160,8 @@ func HandleInteraction(s *discordgo.Session, ic *discordgo.InteractionCreate) {
 	switch ic.ApplicationCommandData().Name {
 	case "ping":
 		respond(s, ic, "pong", false)
+	case "help":
+		handleHelp(s, ic)
 	case "join":
 		handleJoin(s, ic)
 	case "leave":
@@ -219,10 +225,23 @@ func handleJoin(s *discordgo.Session, ic *discordgo.InteractionCreate) {
 	}
 
 	if created {
+		showOnboarding, err := roomStore.TryMarkOnboardingShown(ic.GuildID, ic.ChannelID)
+		if err != nil {
+			respond(s, ic, "参加登録に失敗しました。", true)
+			return
+		}
+		if showOnboarding {
+			respondEmbed(s, ic, util.OnboardingEmbed(), false)
+			return
+		}
 		respond(s, ic, fmt.Sprintf("参加登録しました: %s (%d)", player.Name, player.XPower), false)
 		return
 	}
 	respond(s, ic, fmt.Sprintf("参加情報を更新しました: %s (%d)", player.Name, player.XPower), false)
+}
+
+func handleHelp(s *discordgo.Session, ic *discordgo.InteractionCreate) {
+	respondEmbed(s, ic, util.HelpEmbed(), false)
 }
 
 func handleLeave(s *discordgo.Session, ic *discordgo.InteractionCreate) {
