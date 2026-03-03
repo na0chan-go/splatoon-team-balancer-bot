@@ -46,7 +46,8 @@ docker run --rm \
 
 1. 全員が `/join xpower` で参加
 2. `/make` で初回チーム分け
-3. 試合ごとに `/next` で次編成
+3. 試合が終わったら `/result winner:(alpha|bravo)` で勝敗登録
+4. 次試合は `/next` で編成
 
 補助:
 
@@ -124,4 +125,3 @@ docker run --rm \
 - [Releasing](docs/RELEASING.md)
 - [Changelog](CHANGELOG.md)
 - [License (MIT)](LICENSE)
-
