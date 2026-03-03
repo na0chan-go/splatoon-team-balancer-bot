@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/bwmarrin/discordgo"
+	discordadapter "github.com/na0chan-go/splatoon-team-balancer-bot/internal/adapter/discord"
 	"github.com/na0chan-go/splatoon-team-balancer-bot/internal/domain"
 	"github.com/na0chan-go/splatoon-team-balancer-bot/internal/store"
 	"github.com/na0chan-go/splatoon-team-balancer-bot/internal/util"
@@ -308,7 +309,7 @@ func handleJoin(s *discordgo.Session, ic *discordgo.InteractionCreate) {
 			return
 		}
 		if showOnboarding {
-			respondEmbed(s, ic, util.OnboardingEmbed(), false)
+			respondEmbed(s, ic, discordadapter.OnboardingEmbed(), false)
 			return
 		}
 		respond(s, ic, fmt.Sprintf("参加登録しました: %s (%d)", player.Name, player.XPower), false)
@@ -318,7 +319,7 @@ func handleJoin(s *discordgo.Session, ic *discordgo.InteractionCreate) {
 }
 
 func handleHelp(s *discordgo.Session, ic *discordgo.InteractionCreate) {
-	respondEmbed(s, ic, util.HelpEmbed(), false)
+	respondEmbed(s, ic, discordadapter.HelpEmbed(), false)
 }
 
 func handleLeave(s *discordgo.Session, ic *discordgo.InteractionCreate) {
@@ -343,18 +344,7 @@ func handleLeave(s *discordgo.Session, ic *discordgo.InteractionCreate) {
 
 func handleList(s *discordgo.Session, ic *discordgo.InteractionCreate) {
 	players := roomStore.List(ic.GuildID, ic.ChannelID)
-	if len(players) == 0 {
-		respond(s, ic, "参加者はいません。", false)
-		return
-	}
-
-	var b strings.Builder
-	fmt.Fprintf(&b, "現在の参加者 (%d/10)\n", len(players))
-	for _, p := range players {
-		fmt.Fprintf(&b, "- %s (<@%s>) : %d\n", p.Name, p.ID, p.XPower)
-	}
-
-	respond(s, ic, strings.TrimSpace(b.String()), false)
+	respond(s, ic, discordadapter.ParticipantList(players), false)
 }
 
 func handleMake(s *discordgo.Session, ic *discordgo.InteractionCreate) {
@@ -574,21 +564,7 @@ func handlePaused(s *discordgo.Session, ic *discordgo.InteractionCreate) {
 	}
 
 	paused := roomStore.Paused(ic.GuildID, ic.ChannelID)
-	if len(paused) == 0 {
-		respond(s, ic, "pause中のプレイヤーはいません。", false)
-		return
-	}
-
-	var b strings.Builder
-	b.WriteString("pause中のプレイヤー\n")
-	for _, p := range paused {
-		if p.PauseReason != "" {
-			fmt.Fprintf(&b, "- %s: 残り%d試合（%s）\n", p.Name, p.PauseRemaining, p.PauseReason)
-			continue
-		}
-		fmt.Fprintf(&b, "- %s: 残り%d試合\n", p.Name, p.PauseRemaining)
-	}
-	respond(s, ic, strings.TrimSpace(b.String()), false)
+	respond(s, ic, discordadapter.PausedList(paused), false)
 }
 
 func handleWhoAmI(s *discordgo.Session, ic *discordgo.InteractionCreate) {
@@ -612,7 +588,7 @@ func handleWhoAmI(s *discordgo.Session, ic *discordgo.InteractionCreate) {
 		return
 	}
 
-	embed := util.WhoAmIEmbed(
+	embed := discordadapter.WhoAmIEmbed(
 		info.Name,
 		info.XPower,
 		info.PauseRemaining,
@@ -759,7 +735,7 @@ func handleSettings(s *discordgo.Session, ic *discordgo.InteractionCreate) {
 			respond(s, ic, "settings の読み込みに失敗しました。", true)
 			return
 		}
-		respondEmbed(s, ic, util.SettingsEmbed(roomSettingsToMap(cfg)), false)
+		respondEmbed(s, ic, discordadapter.SettingsEmbed(roomSettingsToMap(cfg)), false)
 	case "set":
 		if !hasResetPermission(ic) {
 			respond(s, ic, "権限がありません", true)
