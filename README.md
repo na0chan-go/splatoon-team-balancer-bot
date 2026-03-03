@@ -33,6 +33,7 @@ Splatoon3 のプライベートマッチでチーム分けを自動化する Dis
 - 観戦ローテーション（spectator_count / last_spectated_at を利用）
 - match history tracking（/result で勝敗を保存）
 - dynamic power adjustment（declared_xpower + rating でマッチング）
+- 連打対策（room単位ロック + /make,/next の3秒クールダウン）
 
 ---
 

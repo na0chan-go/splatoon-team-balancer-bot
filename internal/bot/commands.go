@@ -3,6 +3,7 @@ package bot
 import (
 	"errors"
 	"fmt"
+	"math"
 	"strings"
 	"sync"
 	"time"
@@ -15,12 +16,14 @@ import (
 
 var roomStore store.Store = store.NewMemoryStore()
 var pauseReactionRegistry = newPauseReactionRegistry()
+var roomCommandGuards = newRoomCommandGuardMap()
 
 var ErrNoLastMake = errors.New("no previous make result")
 var ErrNoPreviousMatch = errors.New("no previous match")
 var ErrNotInRoom = errors.New("player not in room")
 
 const rotationDiffSlack = 50
+const makeNextCooldown = 3 * time.Second
 
 func SetStore(s store.Store) {
 	if s == nil {
@@ -263,20 +266,31 @@ func handleMake(s *discordgo.Session, ic *discordgo.InteractionCreate) {
 		respond(s, ic, "このコマンドはサーバー内で実行してください。", true)
 		return
 	}
+	lock, ok := lockRoomMutation(s, ic)
+	if !ok {
+		return
+	}
+	defer lock.mu.Unlock()
+	if !checkAndConsumeMakeNextCooldown(s, ic, lock) {
+		return
+	}
+	if !deferAck(s, ic) {
+		return
+	}
 
 	players := roomStore.List(ic.GuildID, ic.ChannelID)
 	roomStore.SnapshotRoomState(ic.GuildID, ic.ChannelID)
 	result, err := runMatchAndStore(ic.GuildID, ic.ChannelID, players, time.Now().UnixNano())
 	if errors.Is(err, domain.ErrNotEnoughPlayers) {
-		respond(s, ic, "参加者が8人未満のためチーム分けできません。", true)
+		editDeferredContent(s, ic, "参加者が8人未満のためチーム分けできません。")
 		return
 	}
 	if err != nil {
-		respond(s, ic, "チーム分けに失敗しました。", true)
+		editDeferredContent(s, ic, "チーム分けに失敗しました。")
 		return
 	}
 
-	respondEmbed(s, ic, util.MatchResultEmbed(result), false)
+	editDeferredEmbed(s, ic, util.MatchResultEmbed(result))
 }
 
 func handleReroll(s *discordgo.Session, ic *discordgo.InteractionCreate) {
@@ -284,6 +298,11 @@ func handleReroll(s *discordgo.Session, ic *discordgo.InteractionCreate) {
 		respond(s, ic, "このコマンドはサーバー内で実行してください。", true)
 		return
 	}
+	lock, ok := lockRoomMutation(s, ic)
+	if !ok {
+		return
+	}
+	defer lock.mu.Unlock()
 
 	result, err := rerollFromLastSnapshot(ic.GuildID, ic.ChannelID, time.Now().UnixNano())
 	if errors.Is(err, ErrNoLastMake) {
@@ -303,22 +322,33 @@ func handleNext(s *discordgo.Session, ic *discordgo.InteractionCreate) {
 		respond(s, ic, "このコマンドはサーバー内で実行してください。", true)
 		return
 	}
+	lock, ok := lockRoomMutation(s, ic)
+	if !ok {
+		return
+	}
+	defer lock.mu.Unlock()
+	if !checkAndConsumeMakeNextCooldown(s, ic, lock) {
+		return
+	}
+	if !deferAck(s, ic) {
+		return
+	}
 
 	result, err := nextMatchFromCurrentParticipants(ic.GuildID, ic.ChannelID, time.Now().UnixNano())
 	if errors.Is(err, ErrNoPreviousMatch) {
-		respond(s, ic, "先に /make を実行してください。", true)
+		editDeferredContent(s, ic, "先に /make を実行してください。")
 		return
 	}
 	if errors.Is(err, domain.ErrNotEnoughPlayers) {
-		respond(s, ic, "参加者が8人未満のため次試合を作成できません。", true)
+		editDeferredContent(s, ic, "参加者が8人未満のため次試合を作成できません。")
 		return
 	}
 	if err != nil {
-		respond(s, ic, "次試合の作成に失敗しました。", true)
+		editDeferredContent(s, ic, "次試合の作成に失敗しました。")
 		return
 	}
 
-	respondEmbed(s, ic, util.MatchResultEmbed(result), false)
+	editDeferredEmbed(s, ic, util.MatchResultEmbed(result))
 }
 
 func handlePause(s *discordgo.Session, ic *discordgo.InteractionCreate) {
@@ -326,6 +356,11 @@ func handlePause(s *discordgo.Session, ic *discordgo.InteractionCreate) {
 		respond(s, ic, "このコマンドはサーバー内で実行してください。", true)
 		return
 	}
+	lock, ok := lockRoomMutation(s, ic)
+	if !ok {
+		return
+	}
+	defer lock.mu.Unlock()
 
 	targetID := ""
 	targetName := ""
@@ -383,6 +418,11 @@ func handleResume(s *discordgo.Session, ic *discordgo.InteractionCreate) {
 		respond(s, ic, "このコマンドはサーバー内で実行してください。", true)
 		return
 	}
+	lock, ok := lockRoomMutation(s, ic)
+	if !ok {
+		return
+	}
+	defer lock.mu.Unlock()
 
 	targetID := ""
 	targetName := ""
@@ -464,6 +504,11 @@ func handleReset(s *discordgo.Session, ic *discordgo.InteractionCreate) {
 		respond(s, ic, "このコマンドはサーバー内で実行してください。", true)
 		return
 	}
+	lock, ok := lockRoomMutation(s, ic)
+	if !ok {
+		return
+	}
+	defer lock.mu.Unlock()
 	if !hasResetPermission(ic) {
 		respond(s, ic, "権限がありません", true)
 		return
@@ -478,6 +523,11 @@ func handleUndo(s *discordgo.Session, ic *discordgo.InteractionCreate) {
 		respond(s, ic, "このコマンドはサーバー内で実行してください。", true)
 		return
 	}
+	lock, ok := lockRoomMutation(s, ic)
+	if !ok {
+		return
+	}
+	defer lock.mu.Unlock()
 
 	ok, err := undoLastRoomState(ic.GuildID, ic.ChannelID)
 	if err != nil {
@@ -496,6 +546,11 @@ func handleResult(s *discordgo.Session, ic *discordgo.InteractionCreate) {
 		respond(s, ic, "このコマンドはサーバー内で実行してください。", true)
 		return
 	}
+	lock, ok := lockRoomMutation(s, ic)
+	if !ok {
+		return
+	}
+	defer lock.mu.Unlock()
 
 	winner, ok := stringOption(ic.ApplicationCommandData().Options, "winner")
 	if !ok || (winner != "alpha" && winner != "bravo") {
@@ -515,6 +570,43 @@ func handleResult(s *discordgo.Session, ic *discordgo.InteractionCreate) {
 	}
 
 	respond(s, ic, fmt.Sprintf("試合結果を記録しました。勝利: %s", winner), false)
+}
+
+func lockRoomMutation(s *discordgo.Session, ic *discordgo.InteractionCreate) (*roomCommandGuardState, bool) {
+	state, ok := roomCommandGuards.tryLock(roomKey(ic.GuildID, ic.ChannelID))
+	if ok {
+		return state, true
+	}
+	respond(s, ic, "現在処理中です。少し待って再実行してください。", true)
+	return nil, false
+}
+
+func checkAndConsumeMakeNextCooldown(s *discordgo.Session, ic *discordgo.InteractionCreate, state *roomCommandGuardState) bool {
+	remaining, ok := consumeCooldown(&state.makeNextCooldown, time.Now(), makeNextCooldown)
+	if ok {
+		return true
+	}
+	respond(s, ic, fmt.Sprintf("クールダウン中です。あと%d秒待って再実行してください。", remainingSeconds(remaining)), true)
+	return false
+}
+
+func deferAck(s *discordgo.Session, ic *discordgo.InteractionCreate) bool {
+	err := s.InteractionRespond(ic.Interaction, &discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseDeferredChannelMessageWithSource,
+	})
+	return err == nil
+}
+
+func editDeferredContent(s *discordgo.Session, ic *discordgo.InteractionCreate, content string) {
+	_, _ = s.InteractionResponseEdit(ic.Interaction, &discordgo.WebhookEdit{
+		Content: &content,
+	})
+}
+
+func editDeferredEmbed(s *discordgo.Session, ic *discordgo.InteractionCreate, embed *discordgo.MessageEmbed) {
+	_, _ = s.InteractionResponseEdit(ic.Interaction, &discordgo.WebhookEdit{
+		Embeds: &[]*discordgo.MessageEmbed{embed},
+	})
 }
 
 func respond(s *discordgo.Session, ic *discordgo.InteractionCreate, content string, ephemeral bool) {
@@ -667,8 +759,24 @@ type pauseReactionMap struct {
 	entries map[string]pauseReactionTarget
 }
 
+type roomCommandGuardState struct {
+	mu               sync.Mutex
+	makeNextCooldown time.Time
+}
+
+type roomCommandGuardMap struct {
+	mu    sync.Mutex
+	rooms map[string]*roomCommandGuardState
+}
+
 func newPauseReactionRegistry() *pauseReactionMap {
 	return &pauseReactionMap{entries: make(map[string]pauseReactionTarget)}
+}
+
+func newRoomCommandGuardMap() *roomCommandGuardMap {
+	return &roomCommandGuardMap{
+		rooms: make(map[string]*roomCommandGuardState),
+	}
 }
 
 func (m *pauseReactionMap) put(messageID string, target pauseReactionTarget) {
@@ -688,6 +796,45 @@ func (m *pauseReactionMap) delete(messageID string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	delete(m.entries, messageID)
+}
+
+func (m *roomCommandGuardMap) get(roomKey string) *roomCommandGuardState {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	state, ok := m.rooms[roomKey]
+	if ok {
+		return state
+	}
+	state = &roomCommandGuardState{}
+	m.rooms[roomKey] = state
+	return state
+}
+
+func (m *roomCommandGuardMap) tryLock(roomKey string) (*roomCommandGuardState, bool) {
+	state := m.get(roomKey)
+	if !state.mu.TryLock() {
+		return nil, false
+	}
+	return state, true
+}
+
+func consumeCooldown(until *time.Time, now time.Time, duration time.Duration) (time.Duration, bool) {
+	if now.Before(*until) {
+		return until.Sub(now), false
+	}
+	*until = now.Add(duration)
+	return 0, true
+}
+
+func remainingSeconds(d time.Duration) int {
+	if d <= 0 {
+		return 0
+	}
+	return int(math.Ceil(d.Seconds()))
+}
+
+func roomKey(guildID, channelID string) string {
+	return guildID + ":" + channelID
 }
 
 func whoAmIState(guildID, channelID, userID string) (whoAmIInfo, error) {
