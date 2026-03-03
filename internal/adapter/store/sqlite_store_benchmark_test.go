@@ -62,4 +62,3 @@ func BenchmarkSQLiteStoreLoadSave(b *testing.B) {
 		}
 	})
 }
-

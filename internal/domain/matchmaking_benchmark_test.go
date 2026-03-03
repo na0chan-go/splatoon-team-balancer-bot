@@ -23,4 +23,3 @@ func BenchmarkBuildMatchWorstCase10Players(b *testing.B) {
 		}
 	}
 }
-
