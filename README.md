@@ -231,6 +231,9 @@ docker run --rm \
 /paused
 一時離脱中の一覧を表示
 
+/whoami
+自分の状態（pause残り・参加回数・観戦回数・XPower）を表示
+
 /undo
 直前の /make または /next の状態に戻す
 

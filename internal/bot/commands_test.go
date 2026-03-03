@@ -223,3 +223,53 @@ func TestUndoLastRoomStateAfterNextRestoresPreviousState(t *testing.T) {
 		t.Fatalf("expected LastSeed restored to %d, got %d", makeState.LastSeed, restored.LastSeed)
 	}
 }
+
+func TestWhoAmIStateReturnsExpectedFields(t *testing.T) {
+	roomStore = store.NewMemoryStore()
+
+	players := make([]domain.Player, 0, 9)
+	for i := 1; i <= 9; i++ {
+		p := domain.Player{
+			ID:     fmt.Sprintf("u%d", i),
+			Name:   fmt.Sprintf("p%d", i),
+			XPower: 2200 + i,
+		}
+		players = append(players, p)
+		if _, err := roomStore.Join("g1", "c1", p); err != nil {
+			t.Fatalf("join failed: %v", err)
+		}
+	}
+	if err := roomStore.SetPause("g1", "c1", "u1", 2, "break"); err != nil {
+		t.Fatalf("SetPause failed: %v", err)
+	}
+
+	// Make one match where u1 is spectator and u2 participates.
+	result := domain.MatchResult{
+		TeamA:      players[1:5],
+		TeamB:      players[5:9],
+		Spectators: []domain.Player{players[0]},
+	}
+	roomStore.SaveLastMatch("g1", "c1", 1, players, result)
+
+	info, err := whoAmIState("g1", "c1", "u1")
+	if err != nil {
+		t.Fatalf("whoAmIState failed: %v", err)
+	}
+	if info.PauseRemaining != 2 {
+		t.Fatalf("expected pause remaining 2, got %d", info.PauseRemaining)
+	}
+	if info.SpectatorCount != 1 {
+		t.Fatalf("expected spectator count 1, got %d", info.SpectatorCount)
+	}
+	if info.ParticipationCount != 0 {
+		t.Fatalf("expected participation count 0, got %d", info.ParticipationCount)
+	}
+
+	info2, err := whoAmIState("g1", "c1", "u2")
+	if err != nil {
+		t.Fatalf("whoAmIState for u2 failed: %v", err)
+	}
+	if info2.ParticipationCount != 1 {
+		t.Fatalf("expected participation count 1 for u2, got %d", info2.ParticipationCount)
+	}
+}

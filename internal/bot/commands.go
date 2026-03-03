@@ -16,6 +16,7 @@ var roomStore store.Store = store.NewMemoryStore()
 
 var ErrNoLastMake = errors.New("no previous make result")
 var ErrNoPreviousMatch = errors.New("no previous match")
+var ErrNotInRoom = errors.New("player not in room")
 
 const rotationDiffSlack = 50
 
@@ -100,6 +101,10 @@ var commands = []*discordgo.ApplicationCommand{
 		Description: "show paused players in this room",
 	},
 	{
+		Name:        "whoami",
+		Description: "show your current state in this room",
+	},
+	{
 		Name:        "undo",
 		Description: "undo last /make or /next result",
 	},
@@ -162,6 +167,8 @@ func HandleInteraction(s *discordgo.Session, ic *discordgo.InteractionCreate) {
 		handleResume(s, ic)
 	case "paused":
 		handlePaused(s, ic)
+	case "whoami":
+		handleWhoAmI(s, ic)
 	case "undo":
 		handleUndo(s, ic)
 	case "reroll":
@@ -415,6 +422,31 @@ func handlePaused(s *discordgo.Session, ic *discordgo.InteractionCreate) {
 	respond(s, ic, strings.TrimSpace(b.String()), false)
 }
 
+func handleWhoAmI(s *discordgo.Session, ic *discordgo.InteractionCreate) {
+	if ic.GuildID == "" {
+		respond(s, ic, "このコマンドはサーバー内で実行してください。", true)
+		return
+	}
+	user := interactionUser(ic)
+	if user == nil {
+		respond(s, ic, "ユーザー情報を取得できませんでした。", true)
+		return
+	}
+
+	info, err := whoAmIState(ic.GuildID, ic.ChannelID, user.ID)
+	if errors.Is(err, ErrNotInRoom) {
+		respond(s, ic, "この部屋に参加していません。", true)
+		return
+	}
+	if err != nil {
+		respond(s, ic, "状態の取得に失敗しました。", true)
+		return
+	}
+
+	embed := util.WhoAmIEmbed(info.Name, info.XPower, info.PauseRemaining, info.ParticipationCount, info.SpectatorCount)
+	respondEmbed(s, ic, embed, false)
+}
+
 func handleReset(s *discordgo.Session, ic *discordgo.InteractionCreate) {
 	if ic.GuildID == "" {
 		respond(s, ic, "このコマンドはサーバー内で実行してください。", true)
@@ -602,6 +634,39 @@ func nextMatchFromCurrentParticipants(guildID, channelID string, seed int64) (do
 
 func undoLastRoomState(guildID, channelID string) (bool, error) {
 	return roomStore.UndoRoomState(guildID, channelID)
+}
+
+type whoAmIInfo struct {
+	Name               string
+	XPower             int
+	PauseRemaining     int
+	ParticipationCount int
+	SpectatorCount     int
+}
+
+func whoAmIState(guildID, channelID, userID string) (whoAmIInfo, error) {
+	state, ok := roomStore.GetState(guildID, channelID)
+	if !ok {
+		return whoAmIInfo{}, ErrNotInRoom
+	}
+	var player *domain.Player
+	for i := range state.Players {
+		if state.Players[i].ID == userID {
+			player = &state.Players[i]
+			break
+		}
+	}
+	if player == nil {
+		return whoAmIInfo{}, ErrNotInRoom
+	}
+
+	return whoAmIInfo{
+		Name:               player.Name,
+		XPower:             player.XPower,
+		PauseRemaining:     player.PauseRemaining,
+		ParticipationCount: state.ParticipationCounts[userID],
+		SpectatorCount:     state.SpectatorHistory[userID].SpectatorCount,
+	}, nil
 }
 
 func hasResetPermission(ic *discordgo.InteractionCreate) bool {

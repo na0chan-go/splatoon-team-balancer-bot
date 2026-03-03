@@ -212,12 +212,21 @@ func (s *SQLiteStore) SaveLastMatch(guildID, channelID string, seed int64, playe
 	if state.SpectatorHistory == nil {
 		state.SpectatorHistory = make(map[string]SpectatorHistory)
 	}
+	if state.ParticipationCounts == nil {
+		state.ParticipationCounts = make(map[string]int)
+	}
 	now := time.Now().Unix()
 	for _, spectator := range result.Spectators {
 		h := state.SpectatorHistory[spectator.ID]
 		h.SpectatorCount++
 		h.LastSpectatedAt = now
 		state.SpectatorHistory[spectator.ID] = h
+	}
+	for _, p := range result.TeamA {
+		state.ParticipationCounts[p.ID]++
+	}
+	for _, p := range result.TeamB {
+		state.ParticipationCounts[p.ID]++
 	}
 	_ = s.upsertStateLocked(guildID, channelID, state)
 }
@@ -237,6 +246,7 @@ func (s *SQLiteStore) GetState(guildID, channelID string) (RoomState, bool) {
 		LastSeed:            state.LastSeed,
 		LastPlayersSnapshot: copyPlayers(state.LastPlayersSnapshot),
 		SpectatorHistory:    copySpectatorHistory(state.SpectatorHistory),
+		ParticipationCounts: copyParticipationCounts(state.ParticipationCounts),
 	}, true
 }
 

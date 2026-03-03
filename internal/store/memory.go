@@ -27,6 +27,7 @@ type RoomState struct {
 	LastSeed            int64
 	LastPlayersSnapshot []domain.Player
 	SpectatorHistory    map[string]SpectatorHistory
+	ParticipationCounts map[string]int
 	PreviousState       *RoomStateSnapshot
 }
 
@@ -41,6 +42,7 @@ type RoomStateSnapshot struct {
 	LastSeed            int64                       `json:"last_seed"`
 	LastPlayersSnapshot []domain.Player             `json:"last_players_snapshot"`
 	SpectatorHistory    map[string]SpectatorHistory `json:"spectator_history"`
+	ParticipationCounts map[string]int              `json:"participation_counts"`
 }
 
 type MemoryStore struct {
@@ -125,12 +127,21 @@ func (s *MemoryStore) SaveLastMatch(guildID, channelID string, seed int64, playe
 	if state.SpectatorHistory == nil {
 		state.SpectatorHistory = make(map[string]SpectatorHistory)
 	}
+	if state.ParticipationCounts == nil {
+		state.ParticipationCounts = make(map[string]int)
+	}
 	now := time.Now().Unix()
 	for _, spectator := range result.Spectators {
 		h := state.SpectatorHistory[spectator.ID]
 		h.SpectatorCount++
 		h.LastSpectatedAt = now
 		state.SpectatorHistory[spectator.ID] = h
+	}
+	for _, p := range result.TeamA {
+		state.ParticipationCounts[p.ID]++
+	}
+	for _, p := range result.TeamB {
+		state.ParticipationCounts[p.ID]++
 	}
 	s.rooms[key] = state
 }
@@ -186,6 +197,7 @@ func (s *MemoryStore) GetState(guildID, channelID string) (RoomState, bool) {
 		LastSeed:            state.LastSeed,
 		LastPlayersSnapshot: copyPlayers(state.LastPlayersSnapshot),
 		SpectatorHistory:    copySpectatorHistory(state.SpectatorHistory),
+		ParticipationCounts: copyParticipationCounts(state.ParticipationCounts),
 		PreviousState:       copySnapshot(state.PreviousState),
 	}, true
 }
@@ -379,6 +391,7 @@ func snapshotFromState(state RoomState) RoomStateSnapshot {
 		LastSeed:            state.LastSeed,
 		LastPlayersSnapshot: copyPlayers(state.LastPlayersSnapshot),
 		SpectatorHistory:    copySpectatorHistory(state.SpectatorHistory),
+		ParticipationCounts: copyParticipationCounts(state.ParticipationCounts),
 	}
 }
 
@@ -389,6 +402,7 @@ func stateFromSnapshot(snapshot RoomStateSnapshot) RoomState {
 		LastSeed:            snapshot.LastSeed,
 		LastPlayersSnapshot: copyPlayers(snapshot.LastPlayersSnapshot),
 		SpectatorHistory:    copySpectatorHistory(snapshot.SpectatorHistory),
+		ParticipationCounts: copyParticipationCounts(snapshot.ParticipationCounts),
 	}
 }
 
@@ -398,6 +412,17 @@ func copySnapshot(in *RoomStateSnapshot) *RoomStateSnapshot {
 	}
 	cp := snapshotFromState(stateFromSnapshot(*in))
 	return &cp
+}
+
+func copyParticipationCounts(in map[string]int) map[string]int {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string]int, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
 }
 
 func clampRating(r int) int {
