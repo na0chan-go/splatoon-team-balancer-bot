@@ -62,6 +62,7 @@ Formatting and helper functions.
 3. Discord-specific code must not contain matchmaking logic.
 4. All core algorithms must have unit tests.
 5. Avoid unnecessary dependencies.
+6. Always create a feature branch for changes, then open a PR, perform a self-review, and merge after completion.
 
 ---
 
