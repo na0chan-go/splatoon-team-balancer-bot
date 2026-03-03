@@ -45,9 +45,15 @@ func main() {
 	}
 	defer session.Close()
 
-	if err := bot.RegisterGuildCommands(session, cfg.DiscordAppID, cfg.DiscordGuildID); err != nil {
+	registerGuildID := strings.TrimSpace(cfg.DiscordGuildID)
+	registerTarget := "global"
+	if registerGuildID != "" {
+		registerTarget = "guild"
+	}
+	if err := bot.RegisterCommands(session, cfg.DiscordAppID, registerGuildID); err != nil {
 		log.Fatalf("failed to register commands: %v", err)
 	}
+	log.Printf("registered slash commands target=%s guild_id=%q", registerTarget, registerGuildID)
 
 	log.Println("bot started. press Ctrl+C to exit.")
 

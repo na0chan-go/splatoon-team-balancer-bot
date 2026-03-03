@@ -143,10 +143,14 @@ var commands = []*discordgo.ApplicationCommand{
 	},
 }
 
-func RegisterGuildCommands(s *discordgo.Session, appID, guildID string) error {
+func RegisterCommands(s *discordgo.Session, appID, guildID string) error {
+	target := "global"
+	if strings.TrimSpace(guildID) != "" {
+		target = "guild"
+	}
 	for _, cmd := range commands {
 		if _, err := s.ApplicationCommandCreate(appID, guildID, cmd); err != nil {
-			return fmt.Errorf("failed to register command %q: %w", cmd.Name, err)
+			return fmt.Errorf("failed to register %s command %q: %w", target, cmd.Name, err)
 		}
 	}
 	return nil

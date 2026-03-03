@@ -159,8 +159,10 @@ GitHubから取得
 
 - `DISCORD_TOKEN`: Bot token（`Bot ` プレフィックスは不要）
 - `DISCORD_APP_ID`: Discord Application ID
-- `DISCORD_GUILD_ID`: コマンドを登録するテスト用Guild ID（guild commandとして即時反映）
+- `DISCORD_GUILD_ID`: コマンドを登録するGuild ID（設定時はguild登録のみ、未設定時はglobal登録のみ）
 - `SQLITE_PATH`: SQLite DBファイルパス（省略時 `./data.db`）
+
+開発中は `DISCORD_GUILD_ID` の設定を推奨します（guild command は反映が速い）。
 
 ```bash
 export DISCORD_TOKEN=your_token
