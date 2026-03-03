@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/bwmarrin/discordgo"
@@ -13,6 +14,7 @@ import (
 )
 
 var roomStore store.Store = store.NewMemoryStore()
+var pauseReactionRegistry = newPauseReactionRegistry()
 
 var ErrNoLastMake = errors.New("no previous make result")
 var ErrNoPreviousMatch = errors.New("no previous match")
@@ -364,6 +366,16 @@ func handlePause(s *discordgo.Session, ic *discordgo.InteractionCreate) {
 		msg += fmt.Sprintf(" 理由: %s", reason)
 	}
 	respond(s, ic, msg, false)
+
+	notice := fmt.Sprintf("<@%s> が復帰するにはこのメッセージに 👍 リアクションしてください。", targetID)
+	sent, err := s.ChannelMessageSend(ic.ChannelID, notice)
+	if err == nil && sent != nil {
+		pauseReactionRegistry.put(sent.ID, pauseReactionTarget{
+			GuildID:   ic.GuildID,
+			ChannelID: ic.ChannelID,
+			UserID:    targetID,
+		})
+	}
 }
 
 func handleResume(s *discordgo.Session, ic *discordgo.InteractionCreate) {
@@ -644,6 +656,40 @@ type whoAmIInfo struct {
 	SpectatorCount     int
 }
 
+type pauseReactionTarget struct {
+	GuildID   string
+	ChannelID string
+	UserID    string
+}
+
+type pauseReactionMap struct {
+	mu      sync.RWMutex
+	entries map[string]pauseReactionTarget
+}
+
+func newPauseReactionRegistry() *pauseReactionMap {
+	return &pauseReactionMap{entries: make(map[string]pauseReactionTarget)}
+}
+
+func (m *pauseReactionMap) put(messageID string, target pauseReactionTarget) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.entries[messageID] = target
+}
+
+func (m *pauseReactionMap) get(messageID string) (pauseReactionTarget, bool) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	target, ok := m.entries[messageID]
+	return target, ok
+}
+
+func (m *pauseReactionMap) delete(messageID string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	delete(m.entries, messageID)
+}
+
 func whoAmIState(guildID, channelID, userID string) (whoAmIInfo, error) {
 	state, ok := roomStore.GetState(guildID, channelID)
 	if !ok {
@@ -667,6 +713,46 @@ func whoAmIState(guildID, channelID, userID string) (whoAmIInfo, error) {
 		ParticipationCount: state.ParticipationCounts[userID],
 		SpectatorCount:     state.SpectatorHistory[userID].SpectatorCount,
 	}, nil
+}
+
+func HandleReactionAdd(s *discordgo.Session, ev *discordgo.MessageReactionAdd) {
+	if ev == nil || ev.MessageReaction == nil {
+		return
+	}
+	if ev.UserID == "" || ev.Emoji.Name != "👍" {
+		return
+	}
+
+	resumed, targetChannelID := processPauseResumeReaction(
+		ev.MessageID,
+		ev.UserID,
+		ev.GuildID,
+		ev.ChannelID,
+	)
+	if !resumed {
+		return
+	}
+
+	_, _ = s.ChannelMessageSend(targetChannelID, fmt.Sprintf("<@%s> を復帰させました。", ev.UserID))
+}
+
+func processPauseResumeReaction(messageID, reactorUserID, guildID, channelID string) (bool, string) {
+	target, ok := pauseReactionRegistry.get(messageID)
+	if !ok {
+		return false, ""
+	}
+	if target.UserID != reactorUserID {
+		return false, ""
+	}
+	if target.GuildID != guildID || target.ChannelID != channelID {
+		return false, ""
+	}
+
+	if err := roomStore.Resume(guildID, channelID, reactorUserID); err != nil {
+		return false, ""
+	}
+	pauseReactionRegistry.delete(messageID)
+	return true, target.ChannelID
 }
 
 func hasResetPermission(ic *discordgo.InteractionCreate) bool {

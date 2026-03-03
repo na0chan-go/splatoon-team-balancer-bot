@@ -273,3 +273,40 @@ func TestWhoAmIStateReturnsExpectedFields(t *testing.T) {
 		t.Fatalf("expected participation count 1 for u2, got %d", info2.ParticipationCount)
 	}
 }
+
+func TestProcessPauseResumeReaction(t *testing.T) {
+	roomStore = store.NewMemoryStore()
+	pauseReactionRegistry = newPauseReactionRegistry()
+
+	player := domain.Player{ID: "u1", Name: "p1", XPower: 2300}
+	if _, err := roomStore.Join("g1", "c1", player); err != nil {
+		t.Fatalf("join failed: %v", err)
+	}
+	if err := roomStore.SetPause("g1", "c1", "u1", 3, "break"); err != nil {
+		t.Fatalf("SetPause failed: %v", err)
+	}
+
+	pauseReactionRegistry.put("m1", pauseReactionTarget{
+		GuildID: "g1", ChannelID: "c1", UserID: "u1",
+	})
+
+	resumed, _ := processPauseResumeReaction("m1", "u2", "g1", "c1")
+	if resumed {
+		t.Fatal("expected non-target user reaction to be ignored")
+	}
+
+	resumed, channelID := processPauseResumeReaction("m1", "u1", "g1", "c1")
+	if !resumed {
+		t.Fatal("expected target user reaction to resume pause")
+	}
+	if channelID != "c1" {
+		t.Fatalf("expected channel c1, got %s", channelID)
+	}
+
+	state, _ := roomStore.GetState("g1", "c1")
+	for _, p := range state.Players {
+		if p.ID == "u1" && p.PauseRemaining != 0 {
+			t.Fatalf("expected u1 pause remaining 0 after reaction resume, got %d", p.PauseRemaining)
+		}
+	}
+}

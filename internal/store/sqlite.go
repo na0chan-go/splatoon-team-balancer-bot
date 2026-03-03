@@ -270,6 +270,7 @@ CREATE TABLE IF NOT EXISTS room_states (
   last_seed INTEGER NOT NULL,
   last_players_snapshot_json TEXT NOT NULL,
   spectator_history_json TEXT NOT NULL DEFAULT '{}',
+  participation_counts_json TEXT NOT NULL DEFAULT '{}',
   previous_state_json TEXT NOT NULL DEFAULT '',
   PRIMARY KEY (guild_id, channel_id)
 );`
@@ -284,6 +285,10 @@ CREATE TABLE IF NOT EXISTS room_states (
 	_, err = s.db.Exec(`ALTER TABLE room_states ADD COLUMN previous_state_json TEXT NOT NULL DEFAULT ''`)
 	if err != nil && !strings.Contains(strings.ToLower(err.Error()), "duplicate column name") {
 		return fmt.Errorf("failed to migrate sqlite schema for history: %w", err)
+	}
+	_, err = s.db.Exec(`ALTER TABLE room_states ADD COLUMN participation_counts_json TEXT NOT NULL DEFAULT '{}'`)
+	if err != nil && !strings.Contains(strings.ToLower(err.Error()), "duplicate column name") {
+		return fmt.Errorf("failed to migrate sqlite schema for participation counts: %w", err)
 	}
 
 	const playerStatsSchema = `
@@ -324,13 +329,14 @@ func (s *SQLiteStore) getRoomStateLocked(guildID, channelID string) (RoomState, 
 	var lastSeed int64
 	var lastPlayersSnapshotJSON string
 	var spectatorHistoryJSON string
+	var participationCountsJSON string
 	var previousStateJSON string
 
 	err := s.db.QueryRow(
-		`SELECT players_json, last_result_json, last_seed, last_players_snapshot_json, spectator_history_json, previous_state_json
+		`SELECT players_json, last_result_json, last_seed, last_players_snapshot_json, spectator_history_json, participation_counts_json, previous_state_json
 		 FROM room_states WHERE guild_id = ? AND channel_id = ?`,
 		guildID, channelID,
-	).Scan(&playersJSON, &lastResultJSON, &lastSeed, &lastPlayersSnapshotJSON, &spectatorHistoryJSON, &previousStateJSON)
+	).Scan(&playersJSON, &lastResultJSON, &lastSeed, &lastPlayersSnapshotJSON, &spectatorHistoryJSON, &participationCountsJSON, &previousStateJSON)
 	if errors.Is(err, sql.ErrNoRows) {
 		return RoomState{}, false, nil
 	}
@@ -350,6 +356,9 @@ func (s *SQLiteStore) getRoomStateLocked(guildID, channelID string) (RoomState, 
 	}
 	if err := json.Unmarshal([]byte(spectatorHistoryJSON), &state.SpectatorHistory); err != nil {
 		return RoomState{}, false, fmt.Errorf("failed to unmarshal spectator history: %w", err)
+	}
+	if err := json.Unmarshal([]byte(participationCountsJSON), &state.ParticipationCounts); err != nil {
+		return RoomState{}, false, fmt.Errorf("failed to unmarshal participation counts: %w", err)
 	}
 	if strings.TrimSpace(previousStateJSON) != "" {
 		var prev RoomStateSnapshot
@@ -380,6 +389,10 @@ func (s *SQLiteStore) upsertStateLocked(guildID, channelID string, state RoomSta
 	if err != nil {
 		return fmt.Errorf("failed to marshal spectator history: %w", err)
 	}
+	participationCountsJSON, err := json.Marshal(state.ParticipationCounts)
+	if err != nil {
+		return fmt.Errorf("failed to marshal participation counts: %w", err)
+	}
 	previousStateJSON := ""
 	if state.PreviousState != nil {
 		prevJSON, err := json.Marshal(state.PreviousState)
@@ -391,14 +404,15 @@ func (s *SQLiteStore) upsertStateLocked(guildID, channelID string, state RoomSta
 
 	_, err = s.db.Exec(
 		`INSERT INTO room_states
-		  (guild_id, channel_id, players_json, last_result_json, last_seed, last_players_snapshot_json, spectator_history_json, previous_state_json)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		  (guild_id, channel_id, players_json, last_result_json, last_seed, last_players_snapshot_json, spectator_history_json, participation_counts_json, previous_state_json)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 		 ON CONFLICT(guild_id, channel_id) DO UPDATE SET
 		   players_json = excluded.players_json,
 		   last_result_json = excluded.last_result_json,
 		   last_seed = excluded.last_seed,
 		   last_players_snapshot_json = excluded.last_players_snapshot_json,
 		   spectator_history_json = excluded.spectator_history_json,
+		   participation_counts_json = excluded.participation_counts_json,
 		   previous_state_json = excluded.previous_state_json`,
 		guildID,
 		channelID,
@@ -407,6 +421,7 @@ func (s *SQLiteStore) upsertStateLocked(guildID, channelID string, state RoomSta
 		state.LastSeed,
 		string(lastPlayersSnapshotJSON),
 		string(spectatorHistoryJSON),
+		string(participationCountsJSON),
 		previousStateJSON,
 	)
 	if err != nil {

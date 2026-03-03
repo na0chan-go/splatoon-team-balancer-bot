@@ -36,8 +36,9 @@ func main() {
 		log.Fatalf("failed to create discord session: %v", err)
 	}
 
-	session.Identify.Intents = discordgo.IntentsGuilds
+	session.Identify.Intents = discordgo.IntentsGuilds | discordgo.IntentsGuildMessageReactions
 	session.AddHandler(bot.HandleInteraction)
+	session.AddHandler(bot.HandleReactionAdd)
 
 	if err := session.Open(); err != nil {
 		log.Fatalf("failed to open discord session: %v", err)
