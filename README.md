@@ -22,6 +22,15 @@ Splatoon3 のプライベートマッチでチーム分けを自動化する Dis
 
 ---
 
+# 設計ドキュメント
+
+詳細設計は以下を参照してください。
+
+- [Architecture](docs/ARCHITECTURE.md)
+- [Decisions](docs/DECISIONS.md)
+
+---
+
 # 主な機能
 
 - Xパワーを入力してマッチに参加
@@ -83,35 +92,15 @@ Bravoチーム（合計: 9000）
 
 # アルゴリズム
 
-このBotでは **全探索アルゴリズム**を使用し、チームの戦力差が最も小さくなる組み合わせを求めます。
-
-処理の流れ
-
-1. 参加者が8人以上の場合、全ての **8人の組み合わせ** を生成
-2. それぞれの8人について **4人 vs 4人のチーム分け** を生成
-3. チームの合計Xパワー差を計算
-4. 差が最小になる組み合わせを採用
-
-最大探索数
-
-10C8 × (8C4 / 2) = 1575 通り
-
-この規模であれば数ミリ秒以内で計算可能です。
+最適解保証のため、`10C8 × (8C4 / 2) = 1575` 通りの全探索を行います。  
+詳細は [docs/DECISIONS.md](docs/DECISIONS.md) を参照してください。
 
 ---
 
 # アーキテクチャ
 
-Discord
-↓
-Slash Command Handler
-↓
-Matchmaking Engine
-↓
-Team Result Formatter
-
-チーム分けアルゴリズムは Discord の処理から分離されており、
-`internal/domain` に純粋なビジネスロジックとして実装されています。
+レイヤー分離（adapter / app / domain）を採用しています。  
+責務とデータフローの詳細は [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) を参照してください。
 
 ---
 
