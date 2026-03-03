@@ -1,0 +1,3 @@
+ALTER TABLE player_stats ADD COLUMN rating_delta INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE player_stats ADD COLUMN last_played_at INTEGER NOT NULL DEFAULT 0;
+

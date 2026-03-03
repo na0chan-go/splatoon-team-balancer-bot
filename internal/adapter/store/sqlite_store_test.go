@@ -1,6 +1,7 @@
 package store
 
 import (
+	"database/sql"
 	"fmt"
 	"path/filepath"
 	"reflect"
@@ -376,5 +377,130 @@ func TestSQLiteStoreGetExportDataByScope(t *testing.T) {
 	}
 	if len(allStats) == 0 {
 		t.Fatal("expected non-empty all stats")
+	}
+}
+
+func TestSQLiteStoreMigrateThenSaveLoad(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+
+	s, err := NewSQLiteStore(dbPath)
+	if err != nil {
+		t.Fatalf("NewSQLiteStore failed: %v", err)
+	}
+
+	var migrationCount int
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM schema_migrations`).Scan(&migrationCount); err != nil {
+		t.Fatalf("failed to count migrations: %v", err)
+	}
+	if migrationCount < 4 {
+		t.Fatalf("expected at least 4 applied migrations, got %d", migrationCount)
+	}
+
+	players := []domain.Player{
+		{ID: "u1", Name: "p1", XPower: 2500},
+		{ID: "u2", Name: "p2", XPower: 2400},
+		{ID: "u3", Name: "p3", XPower: 2300},
+		{ID: "u4", Name: "p4", XPower: 2200},
+		{ID: "u5", Name: "p5", XPower: 2100},
+		{ID: "u6", Name: "p6", XPower: 2000},
+		{ID: "u7", Name: "p7", XPower: 1900},
+		{ID: "u8", Name: "p8", XPower: 1800},
+	}
+	for _, p := range players {
+		if _, err := s.Join("g1", "c1", p); err != nil {
+			t.Fatalf("join failed: %v", err)
+		}
+	}
+	result := domain.MatchResult{
+		TeamA: players[:4], TeamB: players[4:8],
+		SumA: 9400, SumB: 7800, Diff: 1600,
+	}
+	s.SaveLastMatch("g1", "c1", 99, players, result)
+	if err := s.Close(); err != nil {
+		t.Fatalf("close failed: %v", err)
+	}
+
+	s2, err := NewSQLiteStore(dbPath)
+	if err != nil {
+		t.Fatalf("reopen failed: %v", err)
+	}
+	defer s2.Close()
+
+	state, ok := s2.GetState("g1", "c1")
+	if !ok {
+		t.Fatal("expected persisted state after migration")
+	}
+	if state.LastSeed != 99 {
+		t.Fatalf("expected LastSeed=99, got %d", state.LastSeed)
+	}
+	if !reflect.DeepEqual(state.LastPlayersSnapshot, players) {
+		t.Fatalf("unexpected LastPlayersSnapshot: %+v", state.LastPlayersSnapshot)
+	}
+}
+
+func TestSQLiteStoreMigratesLegacySchemaSafely(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "legacy.db")
+
+	legacyDB, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("failed to open legacy sqlite: %v", err)
+	}
+
+	legacySchema := `
+CREATE TABLE room_states (
+  guild_id TEXT NOT NULL,
+  channel_id TEXT NOT NULL,
+  players_json TEXT NOT NULL,
+  last_result_json TEXT NOT NULL,
+  last_seed INTEGER NOT NULL,
+  last_players_snapshot_json TEXT NOT NULL,
+  PRIMARY KEY (guild_id, channel_id)
+);
+CREATE TABLE player_stats (
+  user_id TEXT PRIMARY KEY,
+  rating INTEGER NOT NULL DEFAULT 0,
+  wins INTEGER NOT NULL DEFAULT 0,
+  losses INTEGER NOT NULL DEFAULT 0
+);`
+	if _, err := legacyDB.Exec(legacySchema); err != nil {
+		t.Fatalf("failed to create legacy schema: %v", err)
+	}
+	if _, err := legacyDB.Exec(
+		`INSERT INTO room_states (guild_id, channel_id, players_json, last_result_json, last_seed, last_players_snapshot_json)
+		 VALUES (?, ?, ?, ?, ?, ?)`,
+		"g1", "c1", `[{"ID":"u1","Name":"p1","XPower":2500}]`, `{"TeamA":[],"TeamB":[],"Spectators":[],"SumA":0,"SumB":0,"Diff":0}`, 77, `[{"ID":"u1","Name":"p1","XPower":2500}]`,
+	); err != nil {
+		t.Fatalf("failed to insert legacy room state: %v", err)
+	}
+	if _, err := legacyDB.Exec(
+		`INSERT INTO player_stats (user_id, rating, wins, losses) VALUES (?, ?, ?, ?)`,
+		"u1", 30, 2, 1,
+	); err != nil {
+		t.Fatalf("failed to insert legacy player_stats: %v", err)
+	}
+	if err := legacyDB.Close(); err != nil {
+		t.Fatalf("failed to close legacy db: %v", err)
+	}
+
+	s, err := NewSQLiteStore(dbPath)
+	if err != nil {
+		t.Fatalf("NewSQLiteStore with legacy db failed: %v", err)
+	}
+	defer s.Close()
+
+	state, ok := s.GetState("g1", "c1")
+	if !ok {
+		t.Fatal("expected legacy room state to be loaded")
+	}
+	if state.LastSeed != 77 {
+		t.Fatalf("expected LastSeed=77, got %d", state.LastSeed)
+	}
+	if got := len(state.Players); got != 1 {
+		t.Fatalf("expected 1 player from legacy row, got %d", got)
+	}
+
+	stats := s.GetPlayerStats([]string{"u1"})
+	if got := stats["u1"].RatingDelta; got != 30 {
+		t.Fatalf("expected legacy rating backfilled to rating_delta=30, got %d", got)
 	}
 }

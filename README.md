@@ -217,6 +217,14 @@ docker run --rm \
 
 ---
 
+# DB初期化/マイグレーション
+
+- 起動時にSQLiteマイグレーションを自動実行します
+- マイグレーションSQLは `migrations/` で管理します
+- 適用履歴は `schema_migrations` テーブルに保存され、既存DBにも安全に適用されます
+
+---
+
 # コマンド一覧
 
 /join <xpower>
