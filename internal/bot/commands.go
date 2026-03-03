@@ -1,6 +1,7 @@
 package bot
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"math"
@@ -142,6 +143,38 @@ var commands = []*discordgo.ApplicationCommand{
 		},
 	},
 	{
+		Name:        "export",
+		Description: "export matches and player stats",
+		Options: []*discordgo.ApplicationCommandOption{
+			{
+				Type:        discordgo.ApplicationCommandOptionString,
+				Name:        "type",
+				Description: "export file type",
+				Required:    true,
+				Choices: []*discordgo.ApplicationCommandOptionChoice{
+					{Name: "csv", Value: "csv"},
+					{Name: "json", Value: "json"},
+				},
+			},
+			{
+				Type:        discordgo.ApplicationCommandOptionString,
+				Name:        "scope",
+				Description: "export scope",
+				Required:    true,
+				Choices: []*discordgo.ApplicationCommandOptionChoice{
+					{Name: "room", Value: "room"},
+					{Name: "all", Value: "all"},
+				},
+			},
+			{
+				Type:        discordgo.ApplicationCommandOptionInteger,
+				Name:        "limit",
+				Description: "recent match limit (default 100)",
+				Required:    false,
+			},
+		},
+	},
+	{
 		Name:        "settings",
 		Description: "show or update room settings",
 		Options: []*discordgo.ApplicationCommandOption{
@@ -228,6 +261,8 @@ func HandleInteraction(s *discordgo.Session, ic *discordgo.InteractionCreate) {
 		handleReset(s, ic)
 	case "result":
 		handleResult(s, ic)
+	case "export":
+		handleExport(s, ic)
 	case "settings":
 		handleSettings(s, ic)
 	}
@@ -654,6 +689,48 @@ func handleResult(s *discordgo.Session, ic *discordgo.InteractionCreate) {
 	respond(s, ic, fmt.Sprintf("試合結果を記録しました。勝利: %s", winner), false)
 }
 
+func handleExport(s *discordgo.Session, ic *discordgo.InteractionCreate) {
+	if ic.GuildID == "" {
+		respond(s, ic, "このコマンドはサーバー内で実行してください。", true)
+		return
+	}
+	fileType, ok := stringOption(ic.ApplicationCommandData().Options, "type")
+	if !ok || (fileType != "csv" && fileType != "json") {
+		respond(s, ic, "type は csv か json を指定してください。", true)
+		return
+	}
+	scope, ok := stringOption(ic.ApplicationCommandData().Options, "scope")
+	if !ok || (scope != "room" && scope != "all") {
+		respond(s, ic, "scope は room か all を指定してください。", true)
+		return
+	}
+
+	limit := 100
+	if v, ok := intOption(ic.ApplicationCommandData().Options, "limit"); ok {
+		limit = v
+	}
+	if limit < 1 || limit > 5000 {
+		respond(s, ic, "limit は 1〜5000 の範囲で指定してください。", true)
+		return
+	}
+
+	if !deferAck(s, ic) {
+		return
+	}
+
+	matches, stats, err := roomStore.GetExportData(ic.GuildID, ic.ChannelID, scope, limit)
+	if err != nil {
+		editDeferredContent(s, ic, "export の取得に失敗しました。")
+		return
+	}
+	files, err := util.BuildExportFiles(fileType, matches, stats)
+	if err != nil {
+		editDeferredContent(s, ic, "export ファイルの生成に失敗しました。")
+		return
+	}
+	sendDeferredFiles(s, ic, fmt.Sprintf("export completed: type=%s scope=%s matches=%d stats=%d", fileType, scope, len(matches), len(stats)), files)
+}
+
 func handleSettings(s *discordgo.Session, ic *discordgo.InteractionCreate) {
 	if ic.GuildID == "" {
 		respond(s, ic, "このコマンドはサーバー内で実行してください。", true)
@@ -744,6 +821,24 @@ func editDeferredContent(s *discordgo.Session, ic *discordgo.InteractionCreate, 
 func editDeferredEmbed(s *discordgo.Session, ic *discordgo.InteractionCreate, embed *discordgo.MessageEmbed) {
 	_, _ = s.InteractionResponseEdit(ic.Interaction, &discordgo.WebhookEdit{
 		Embeds: &[]*discordgo.MessageEmbed{embed},
+	})
+}
+
+func sendDeferredFiles(s *discordgo.Session, ic *discordgo.InteractionCreate, content string, files []util.ExportFile) {
+	_, _ = s.InteractionResponseEdit(ic.Interaction, &discordgo.WebhookEdit{
+		Content: &content,
+	})
+
+	dFiles := make([]*discordgo.File, 0, len(files))
+	for _, f := range files {
+		dFiles = append(dFiles, &discordgo.File{
+			Name:   f.Name,
+			Reader: bytes.NewReader(f.Data),
+		})
+	}
+	_, _ = s.FollowupMessageCreate(ic.Interaction, false, &discordgo.WebhookParams{
+		Content: content,
+		Files:   dFiles,
 	})
 }
 

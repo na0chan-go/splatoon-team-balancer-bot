@@ -13,6 +13,7 @@ var (
 	ErrRoomFull      = errors.New("room is full")
 	ErrNotJoined     = errors.New("player not joined")
 	ErrInvalidXPower = errors.New("xpower must be between 0 and 5000")
+	ErrUnsupported   = errors.New("operation unsupported by this store")
 )
 
 const (
@@ -485,4 +486,8 @@ func clampRating(r int) int {
 	default:
 		return r
 	}
+}
+
+func (s *MemoryStore) GetExportData(guildID, channelID, scope string, limit int) ([]MatchRecord, []PlayerStat, error) {
+	return nil, nil, ErrUnsupported
 }

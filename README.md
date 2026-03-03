@@ -255,6 +255,10 @@ docker run --rm \
 /result <alpha|bravo>
 試合結果を記録してratingを更新
 
+/export type:(csv|json) scope:(room|all) limit:int
+試合履歴とプレイヤー統計をファイル出力
+（`scope=room` は現在のroom、`scope=all` は同一guild全体）
+
 /reset
 部屋を初期化
 

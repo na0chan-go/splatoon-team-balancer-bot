@@ -657,6 +657,116 @@ func (s *SQLiteStore) RecordMatchResult(guildID, channelID, winnerTeam string, r
 	return tx.Commit()
 }
 
+func (s *SQLiteStore) GetExportData(guildID, channelID, scope string, limit int) ([]MatchRecord, []PlayerStat, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if limit <= 0 {
+		limit = 100
+	}
+	if limit > 5000 {
+		limit = 5000
+	}
+
+	var (
+		rows *sql.Rows
+		err  error
+	)
+	switch scope {
+	case "room":
+		rows, err = s.db.Query(
+			`SELECT id, guild_id, channel_id, winner_team, team_a_json, team_b_json, spectators_json, sum_a, sum_b, diff, created_at
+			 FROM matches
+			 WHERE guild_id = ? AND channel_id = ?
+			 ORDER BY created_at DESC, id DESC
+			 LIMIT ?`,
+			guildID, channelID, limit,
+		)
+	case "all":
+		rows, err = s.db.Query(
+			`SELECT id, guild_id, channel_id, winner_team, team_a_json, team_b_json, spectators_json, sum_a, sum_b, diff, created_at
+			 FROM matches
+			 WHERE guild_id = ?
+			 ORDER BY created_at DESC, id DESC
+			 LIMIT ?`,
+			guildID, limit,
+		)
+	default:
+		return nil, nil, fmt.Errorf("unknown scope: %s", scope)
+	}
+	if err != nil {
+		return nil, nil, err
+	}
+	defer rows.Close()
+
+	matches := make([]MatchRecord, 0)
+	userSet := make(map[string]struct{})
+	for rows.Next() {
+		var rec MatchRecord
+		var teamAJSON, teamBJSON, spectatorsJSON string
+		if err := rows.Scan(
+			&rec.ID, &rec.GuildID, &rec.ChannelID, &rec.WinnerTeam,
+			&teamAJSON, &teamBJSON, &spectatorsJSON,
+			&rec.SumA, &rec.SumB, &rec.Diff, &rec.CreatedAt,
+		); err != nil {
+			return nil, nil, err
+		}
+		if err := json.Unmarshal([]byte(teamAJSON), &rec.TeamA); err != nil {
+			return nil, nil, err
+		}
+		if err := json.Unmarshal([]byte(teamBJSON), &rec.TeamB); err != nil {
+			return nil, nil, err
+		}
+		if err := json.Unmarshal([]byte(spectatorsJSON), &rec.Spectators); err != nil {
+			return nil, nil, err
+		}
+		for _, p := range rec.TeamA {
+			userSet[p.ID] = struct{}{}
+		}
+		for _, p := range rec.TeamB {
+			userSet[p.ID] = struct{}{}
+		}
+		for _, p := range rec.Spectators {
+			userSet[p.ID] = struct{}{}
+		}
+		matches = append(matches, rec)
+	}
+
+	userIDs := make([]string, 0, len(userSet))
+	for userID := range userSet {
+		userIDs = append(userIDs, userID)
+	}
+	sort.Strings(userIDs)
+	stats := make([]PlayerStat, 0, len(userIDs))
+	if len(userIDs) > 0 {
+		query, args := inClause("user_id", userIDs)
+		statRows, err := s.db.Query(
+			fmt.Sprintf(`SELECT user_id, rating, wins, losses FROM player_stats WHERE %s`, query),
+			args...,
+		)
+		if err != nil {
+			return nil, nil, err
+		}
+		defer statRows.Close()
+
+		for statRows.Next() {
+			var st PlayerStat
+			if err := statRows.Scan(&st.UserID, &st.Rating, &st.Wins, &st.Losses); err != nil {
+				return nil, nil, err
+			}
+			st.Rating = clampRating(st.Rating)
+			stats = append(stats, st)
+		}
+	}
+	sort.Slice(stats, func(i, j int) bool {
+		if stats[i].Rating == stats[j].Rating {
+			return stats[i].UserID < stats[j].UserID
+		}
+		return stats[i].Rating > stats[j].Rating
+	})
+	return matches, stats, nil
+}
+
 func inClause(column string, values []string) (string, []any) {
 	parts := make([]string, 0, len(values))
 	args := make([]any, 0, len(values))

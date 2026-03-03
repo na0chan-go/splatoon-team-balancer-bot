@@ -9,6 +9,20 @@ type PlayerStat struct {
 	Losses int
 }
 
+type MatchRecord struct {
+	ID         int64
+	GuildID    string
+	ChannelID  string
+	WinnerTeam string
+	TeamA      []domain.Player
+	TeamB      []domain.Player
+	Spectators []domain.Player
+	SumA       int
+	SumB       int
+	Diff       int
+	CreatedAt  int64
+}
+
 type Store interface {
 	Join(guildID, channelID string, player domain.Player) (bool, error)
 	TryMarkOnboardingShown(guildID, channelID string) (bool, error)
@@ -27,4 +41,5 @@ type Store interface {
 	DecrementPauses(guildID, channelID string)
 	GetPlayerStats(userIDs []string) map[string]PlayerStat
 	RecordMatchResult(guildID, channelID, winnerTeam string, result domain.MatchResult) error
+	GetExportData(guildID, channelID, scope string, limit int) ([]MatchRecord, []PlayerStat, error)
 }

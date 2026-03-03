@@ -317,3 +317,61 @@ func TestSQLiteStoreRoomSettingsPersist(t *testing.T) {
 		t.Fatalf("unexpected settings: %+v", got)
 	}
 }
+
+func TestSQLiteStoreGetExportDataByScope(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+	s, err := NewSQLiteStore(dbPath)
+	if err != nil {
+		t.Fatalf("NewSQLiteStore failed: %v", err)
+	}
+	defer s.Close()
+
+	base := domain.MatchResult{
+		TeamA: []domain.Player{
+			{ID: "u1", Name: "p1", XPower: 2400},
+			{ID: "u2", Name: "p2", XPower: 2300},
+			{ID: "u3", Name: "p3", XPower: 2200},
+			{ID: "u4", Name: "p4", XPower: 2100},
+		},
+		TeamB: []domain.Player{
+			{ID: "u5", Name: "p5", XPower: 2400},
+			{ID: "u6", Name: "p6", XPower: 2300},
+			{ID: "u7", Name: "p7", XPower: 2200},
+			{ID: "u8", Name: "p8", XPower: 2100},
+		},
+	}
+	if err := s.RecordMatchResult("g1", "c1", "alpha", base); err != nil {
+		t.Fatalf("RecordMatchResult g1/c1 failed: %v", err)
+	}
+	if err := s.RecordMatchResult("g1", "c2", "bravo", base); err != nil {
+		t.Fatalf("RecordMatchResult g1/c2 failed: %v", err)
+	}
+	if err := s.RecordMatchResult("g2", "c9", "alpha", base); err != nil {
+		t.Fatalf("RecordMatchResult g2/c9 failed: %v", err)
+	}
+
+	roomMatches, roomStats, err := s.GetExportData("g1", "c1", "room", 10)
+	if err != nil {
+		t.Fatalf("GetExportData room failed: %v", err)
+	}
+	if got := len(roomMatches); got != 1 {
+		t.Fatalf("expected 1 room match, got %d", got)
+	}
+	if got := roomMatches[0].ChannelID; got != "c1" {
+		t.Fatalf("expected channel c1, got %s", got)
+	}
+	if len(roomStats) == 0 {
+		t.Fatal("expected non-empty room stats")
+	}
+
+	allMatches, allStats, err := s.GetExportData("g1", "c1", "all", 10)
+	if err != nil {
+		t.Fatalf("GetExportData all failed: %v", err)
+	}
+	if got := len(allMatches); got != 2 {
+		t.Fatalf("expected 2 guild matches, got %d", got)
+	}
+	if len(allStats) == 0 {
+		t.Fatal("expected non-empty all stats")
+	}
+}
