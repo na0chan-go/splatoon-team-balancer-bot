@@ -23,6 +23,7 @@ var roomUC = usecase.NewRoomService(roomStore)
 var roomRepo = storeadapter.NewRoomRepository(roomStore)
 var pauseReactionRegistry = newPauseReactionRegistry()
 var roomCommandGuards = newRoomCommandGuardMap()
+var diagnoseSQLitePath = "(memory)"
 
 func init() {
 	roomUC.SetRoomRepository(roomRepo)
@@ -40,6 +41,14 @@ func SetStore(s store.Store) {
 	roomUC.SetStore(s)
 	roomRepo = storeadapter.NewRoomRepository(s)
 	roomUC.SetRoomRepository(roomRepo)
+}
+
+func SetSQLitePath(path string) {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return
+	}
+	diagnoseSQLitePath = path
 }
 
 var commands = []*discordgo.ApplicationCommand{
@@ -218,6 +227,10 @@ var commands = []*discordgo.ApplicationCommand{
 				},
 			},
 		},
+	},
+	{
+		Name:        "diagnose",
+		Description: "show room diagnostics (admin only)",
 	},
 }
 
@@ -723,6 +736,48 @@ func handleSettings(s *discordgo.Session, ic *discordgo.InteractionCreate) {
 	}
 }
 
+func handleDiagnose(s *discordgo.Session, ic *discordgo.InteractionCreate) {
+	if ic.GuildID == "" {
+		respond(s, ic, "このコマンドはサーバー内で実行してください。", true)
+		return
+	}
+	if !hasResetPermission(ic) {
+		respond(s, ic, "権限がありません", true)
+		return
+	}
+
+	state, _ := roomStore.GetState(ic.GuildID, ic.ChannelID)
+	activePlayers := 0
+	pausedPlayers := 0
+	for _, p := range state.Players {
+		if p.PauseRemaining > 0 {
+			pausedPlayers++
+			continue
+		}
+		activePlayers++
+	}
+
+	room := roomKey(ic.GuildID, ic.ChannelID)
+	guard := roomCommandGuards.snapshot(room, time.Now())
+	cooldownRemainingSec := -1
+	if guard.CooldownKnown {
+		cooldownRemainingSec = remainingSeconds(guard.MakeNextCooldownRemaining)
+	}
+
+	embed := discordadapter.DiagnoseEmbed(
+		ic.GuildID,
+		ic.ChannelID,
+		room,
+		activePlayers,
+		pausedPlayers,
+		guard.Locked,
+		cooldownRemainingSec,
+		diagnoseSQLitePath,
+		state.LastResultAt,
+	)
+	respondEmbed(s, ic, embed, true)
+}
+
 func lockRoomMutation(s *discordgo.Session, ic *discordgo.InteractionCreate) (*roomCommandGuardState, bool) {
 	state, ok := roomCommandGuards.tryLock(roomKey(ic.GuildID, ic.ChannelID))
 	if ok {
@@ -927,6 +982,12 @@ type roomCommandGuardState struct {
 	makeNextCooldown time.Time
 }
 
+type roomGuardSnapshot struct {
+	Locked                    bool
+	CooldownKnown             bool
+	MakeNextCooldownRemaining time.Duration
+}
+
 type roomCommandGuardMap struct {
 	mu    sync.Mutex
 	rooms map[string]*roomCommandGuardState
@@ -979,6 +1040,27 @@ func (m *roomCommandGuardMap) tryLock(roomKey string) (*roomCommandGuardState, b
 		return nil, false
 	}
 	return state, true
+}
+
+func (m *roomCommandGuardMap) snapshot(roomKey string, now time.Time) roomGuardSnapshot {
+	state := m.get(roomKey)
+	if !state.mu.TryLock() {
+		return roomGuardSnapshot{
+			Locked:        true,
+			CooldownKnown: false,
+		}
+	}
+	defer state.mu.Unlock()
+
+	remaining := time.Duration(0)
+	if now.Before(state.makeNextCooldown) {
+		remaining = state.makeNextCooldown.Sub(now)
+	}
+	return roomGuardSnapshot{
+		Locked:                    false,
+		CooldownKnown:             true,
+		MakeNextCooldownRemaining: remaining,
+	}
 }
 
 func consumeCooldown(until *time.Time, now time.Time, duration time.Duration) (time.Duration, bool) {

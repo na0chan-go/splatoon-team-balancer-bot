@@ -1,0 +1,2 @@
+ALTER TABLE room_states ADD COLUMN last_result_at INTEGER NOT NULL DEFAULT 0;
+

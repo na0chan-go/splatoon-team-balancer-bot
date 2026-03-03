@@ -3,6 +3,7 @@ package discord
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/bwmarrin/discordgo"
 	"github.com/na0chan-go/splatoon-team-balancer-bot/internal/domain"
@@ -92,6 +93,36 @@ func SettingsEmbed(settings map[string]string) *discordgo.MessageEmbed {
 	return &discordgo.MessageEmbed{
 		Title:       "Room Settings",
 		Description: strings.TrimSpace(b.String()),
+	}
+}
+
+func DiagnoseEmbed(guildID, channelID, roomKey string, activePlayers, pausedPlayers int, locked bool, makeNextCooldownRemainingSeconds int, sqlitePath string, lastResultAt int64) *discordgo.MessageEmbed {
+	lockedText := "no"
+	if locked {
+		lockedText = "yes"
+	}
+	cooldownText := "make: 0s\nnext: 0s"
+	if makeNextCooldownRemainingSeconds < 0 {
+		cooldownText = "make: processing\nnext: processing"
+	} else if makeNextCooldownRemainingSeconds > 0 {
+		cooldownText = fmt.Sprintf("make: %ds\nnext: %ds", makeNextCooldownRemainingSeconds, makeNextCooldownRemainingSeconds)
+	}
+
+	lastResultText := "none"
+	if lastResultAt > 0 {
+		lastResultText = time.Unix(lastResultAt, 0).UTC().Format(time.RFC3339)
+	}
+
+	return &discordgo.MessageEmbed{
+		Title: "Team Balancer Diagnose",
+		Fields: []*discordgo.MessageEmbedField{
+			{Name: "Room", Value: fmt.Sprintf("key: `%s`\nguild_id: `%s`\nchannel_id: `%s`", roomKey, guildID, channelID)},
+			{Name: "Players", Value: fmt.Sprintf("active: %d\npaused: %d", activePlayers, pausedPlayers), Inline: true},
+			{Name: "Locked", Value: lockedText, Inline: true},
+			{Name: "Cooldown", Value: cooldownText, Inline: true},
+			{Name: "SQLite", Value: fmt.Sprintf("path: `%s`", sqlitePath)},
+			{Name: "Last Result", Value: fmt.Sprintf("timestamp: %s", lastResultText)},
+		},
 	}
 }
 

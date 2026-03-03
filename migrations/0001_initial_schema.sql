@@ -4,6 +4,7 @@ CREATE TABLE IF NOT EXISTS room_states (
   players_json TEXT NOT NULL,
   last_result_json TEXT NOT NULL,
   last_seed INTEGER NOT NULL,
+  last_result_at INTEGER NOT NULL DEFAULT 0,
   last_players_snapshot_json TEXT NOT NULL,
   spectator_history_json TEXT NOT NULL DEFAULT '{}',
   participation_counts_json TEXT NOT NULL DEFAULT '{}',
@@ -42,4 +43,3 @@ CREATE TABLE IF NOT EXISTS room_settings (
   value TEXT NOT NULL,
   PRIMARY KEY (guild_id, channel_id, key)
 );
-

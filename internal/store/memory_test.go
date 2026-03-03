@@ -125,6 +125,9 @@ func TestMemoryStoreSaveAndGetLastMatchState(t *testing.T) {
 	if state.LastSeed != 42 {
 		t.Fatalf("expected LastSeed=42, got %d", state.LastSeed)
 	}
+	if state.LastResultAt == 0 {
+		t.Fatal("expected LastResultAt to be set")
+	}
 	if !reflect.DeepEqual(state.LastPlayersSnapshot, players) {
 		t.Fatalf("unexpected LastPlayersSnapshot: %+v", state.LastPlayersSnapshot)
 	}

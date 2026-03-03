@@ -47,3 +47,33 @@ func TestRoomCommandGuardTryLock(t *testing.T) {
 	}
 	state2.mu.Unlock()
 }
+
+func TestRoomCommandGuardSnapshot(t *testing.T) {
+	guards := newRoomCommandGuardMap()
+	now := time.Unix(100, 0)
+
+	s := guards.get("g1:c1")
+	s.makeNextCooldown = now.Add(3 * time.Second)
+	snap := guards.snapshot("g1:c1", now)
+	if snap.Locked {
+		t.Fatal("expected unlocked snapshot")
+	}
+	if !snap.CooldownKnown {
+		t.Fatal("expected cooldown to be known")
+	}
+	if got := remainingSeconds(snap.MakeNextCooldownRemaining); got != 3 {
+		t.Fatalf("expected remaining 3 seconds, got %d", got)
+	}
+
+	if _, ok := guards.tryLock("g1:c1"); !ok {
+		t.Fatal("expected explicit lock for lock-state test")
+	}
+	snapLocked := guards.snapshot("g1:c1", now)
+	if !snapLocked.Locked {
+		t.Fatal("expected locked snapshot while room is locked")
+	}
+	if snapLocked.CooldownKnown {
+		t.Fatal("expected cooldown to be unknown while locked")
+	}
+	s.mu.Unlock()
+}

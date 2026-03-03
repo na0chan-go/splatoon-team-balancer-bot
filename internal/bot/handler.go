@@ -42,5 +42,7 @@ func HandleInteraction(s *discordgo.Session, ic *discordgo.InteractionCreate) {
 		handleExport(s, ic)
 	case "settings":
 		handleSettings(s, ic)
+	case "diagnose":
+		handleDiagnose(s, ic)
 	}
 }

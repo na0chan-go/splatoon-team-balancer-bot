@@ -64,6 +64,9 @@ func TestSQLiteStorePersistsRoomState(t *testing.T) {
 	if state.LastSeed != 123 {
 		t.Fatalf("expected LastSeed=123, got %d", state.LastSeed)
 	}
+	if state.LastResultAt == 0 {
+		t.Fatal("expected LastResultAt to be set")
+	}
 	if !reflect.DeepEqual(state.LastPlayersSnapshot, players) {
 		t.Fatalf("unexpected LastPlayersSnapshot: %+v", state.LastPlayersSnapshot)
 	}
@@ -392,8 +395,8 @@ func TestSQLiteStoreMigrateThenSaveLoad(t *testing.T) {
 	if err := s.db.QueryRow(`SELECT COUNT(*) FROM schema_migrations`).Scan(&migrationCount); err != nil {
 		t.Fatalf("failed to count migrations: %v", err)
 	}
-	if migrationCount < 4 {
-		t.Fatalf("expected at least 4 applied migrations, got %d", migrationCount)
+	if migrationCount < 5 {
+		t.Fatalf("expected at least 5 applied migrations, got %d", migrationCount)
 	}
 
 	players := []domain.Player{
@@ -432,6 +435,9 @@ func TestSQLiteStoreMigrateThenSaveLoad(t *testing.T) {
 	}
 	if state.LastSeed != 99 {
 		t.Fatalf("expected LastSeed=99, got %d", state.LastSeed)
+	}
+	if state.LastResultAt == 0 {
+		t.Fatal("expected LastResultAt after SaveLastMatch")
 	}
 	if !reflect.DeepEqual(state.LastPlayersSnapshot, players) {
 		t.Fatalf("unexpected LastPlayersSnapshot: %+v", state.LastPlayersSnapshot)
