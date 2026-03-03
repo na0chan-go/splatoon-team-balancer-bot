@@ -3,7 +3,6 @@ package domain
 import (
 	"errors"
 	"math"
-	"math/rand"
 )
 
 var (
@@ -78,8 +77,7 @@ func buildMatch(players []Player, seed int64, diffSlack int, penaltyFn func(Matc
 	}
 
 	candidates = selectCandidatesByBalanceAndPenalty(players, candidates, bestDiff, diffSlack, penaltyFn)
-	r := rand.New(rand.NewSource(seed))
-	chosen := candidates[r.Intn(len(candidates))]
+	chosen := candidates[pickIndexBySeed(seed, len(candidates))]
 
 	return buildResult(players, chosen), nil
 }
@@ -300,4 +298,17 @@ func abs(n int) int {
 		return -n
 	}
 	return n
+}
+
+func pickIndexBySeed(seed int64, size int) int {
+	if size <= 1 {
+		return 0
+	}
+	x := uint64(seed)
+	x ^= x >> 33
+	x *= 0xff51afd7ed558ccd
+	x ^= x >> 33
+	x *= 0xc4ceb9fe1a85ec53
+	x ^= x >> 33
+	return int(x % uint64(size))
 }

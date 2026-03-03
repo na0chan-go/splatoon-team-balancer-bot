@@ -2,6 +2,7 @@ package usecase
 
 import (
 	"errors"
+	"math/rand"
 	"sort"
 	"strconv"
 	"time"
@@ -19,7 +20,8 @@ const rotationDiffSlack = 50
 type RoomService struct {
 	store    store.Store
 	roomRepo RoomRepository
-	now      func() time.Time
+	clock    Clock
+	rng      RNG
 }
 
 type WhoAmIInfo struct {
@@ -36,7 +38,8 @@ type WhoAmIInfo struct {
 func NewRoomService(s store.Store) *RoomService {
 	return &RoomService{
 		store: s,
-		now:   time.Now,
+		clock: realClock{},
+		rng:   rand.New(rand.NewSource(time.Now().UnixNano())),
 	}
 }
 
@@ -48,6 +51,18 @@ func (u *RoomService) SetStore(s store.Store) {
 
 func (u *RoomService) SetRoomRepository(repo RoomRepository) {
 	u.roomRepo = repo
+}
+
+func (u *RoomService) SetClock(c Clock) {
+	if c != nil {
+		u.clock = c
+	}
+}
+
+func (u *RoomService) SetRNG(r RNG) {
+	if r != nil {
+		u.rng = r
+	}
 }
 
 func (u *RoomService) Join(guildID, channelID string, player domain.Player) (bool, bool, error) {
@@ -121,21 +136,21 @@ func (u *RoomService) UpdateRoomSetting(guildID, channelID, key, value string) e
 	return u.store.SetRoomSetting(guildID, channelID, key, value)
 }
 
-func (u *RoomService) Make(guildID, channelID string, settings domain.RoomSettings, seed int64) (domain.MatchResult, error) {
+func (u *RoomService) Make(guildID, channelID string, settings domain.RoomSettings) (domain.MatchResult, error) {
 	players := u.store.List(guildID, channelID)
 	u.store.SnapshotRoomState(guildID, channelID)
-	return u.RunMatchWithPlayers(guildID, channelID, players, settings, seed)
+	return u.RunMatchWithPlayers(guildID, channelID, players, settings, u.nextSeed())
 }
 
-func (u *RoomService) Reroll(guildID, channelID string, settings domain.RoomSettings, seed int64) (domain.MatchResult, error) {
+func (u *RoomService) Reroll(guildID, channelID string, settings domain.RoomSettings) (domain.MatchResult, error) {
 	state, ok := u.store.GetState(guildID, channelID)
 	if !ok || len(state.LastPlayersSnapshot) == 0 {
 		return domain.MatchResult{}, ErrNoLastMake
 	}
-	return u.RunMatchWithPlayers(guildID, channelID, state.LastPlayersSnapshot, settings, seed)
+	return u.RunMatchWithPlayers(guildID, channelID, state.LastPlayersSnapshot, settings, u.nextSeed())
 }
 
-func (u *RoomService) Next(guildID, channelID string, settings domain.RoomSettings, seed int64) (domain.MatchResult, error) {
+func (u *RoomService) Next(guildID, channelID string, settings domain.RoomSettings) (domain.MatchResult, error) {
 	state, ok := u.store.GetState(guildID, channelID)
 	if !ok || len(state.LastResult.TeamA) == 0 || len(state.LastResult.TeamB) == 0 {
 		return domain.MatchResult{}, ErrNoPreviousMatch
@@ -151,7 +166,7 @@ func (u *RoomService) Next(guildID, channelID string, settings domain.RoomSettin
 		}
 		active = append(active, p)
 	}
-	return u.RunMatchWithPlayers(guildID, channelID, active, settings, seed)
+	return u.RunMatchWithPlayers(guildID, channelID, active, settings, u.nextSeed())
 }
 
 func (u *RoomService) WhoAmI(guildID, channelID, userID string) (WhoAmIInfo, error) {
@@ -196,7 +211,7 @@ func (u *RoomService) Export(guildID, channelID, scope string, limit int) ([]sto
 
 func (u *RoomService) RunMatchWithPlayers(guildID, channelID string, players []domain.Player, settings domain.RoomSettings, seed int64) (domain.MatchResult, error) {
 	state, _ := u.loadRoomState(guildID, channelID)
-	penaltyFn := combinedPenaltyFunc(state, settings, u.now().Unix())
+	penaltyFn := combinedPenaltyFunc(state, settings, u.clock.Now().Unix())
 	effectivePlayers := applyRatings(players, u.store.GetPlayerStats(playerIDs(players)))
 
 	result, err := domain.BuildMatchWithResultPenalty(effectivePlayers, seed, rotationDiffSlack, penaltyFn)
@@ -217,6 +232,13 @@ func (u *RoomService) loadRoomState(guildID, channelID string) (store.RoomState,
 	}
 	state, _ := u.store.GetState(guildID, channelID)
 	return state, nil
+}
+
+func (u *RoomService) nextSeed() int64 {
+	if u.rng != nil {
+		return u.rng.Int63()
+	}
+	return u.clock.Now().UnixNano()
 }
 
 func SameTeamPenalty(last domain.MatchResult, result domain.MatchResult) int {

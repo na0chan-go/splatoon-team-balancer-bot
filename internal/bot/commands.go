@@ -372,7 +372,7 @@ func handleMake(s *discordgo.Session, ic *discordgo.InteractionCreate) {
 		return
 	}
 
-	result, err := roomUC.Make(ic.GuildID, ic.ChannelID, settings, time.Now().UnixNano())
+	result, err := roomUC.Make(ic.GuildID, ic.ChannelID, settings)
 	if errors.Is(err, domain.ErrNotEnoughPlayers) {
 		editDeferredContent(s, ic, "参加者が8人未満のためチーム分けできません。")
 		return
@@ -401,7 +401,7 @@ func handleReroll(s *discordgo.Session, ic *discordgo.InteractionCreate) {
 		respond(s, ic, "settings の読み込みに失敗しました。", true)
 		return
 	}
-	result, err := roomUC.Reroll(ic.GuildID, ic.ChannelID, settings, time.Now().UnixNano())
+	result, err := roomUC.Reroll(ic.GuildID, ic.ChannelID, settings)
 	if errors.Is(err, ErrNoLastMake) {
 		respond(s, ic, "先に /make を実行してください。", true)
 		return
@@ -436,7 +436,7 @@ func handleNext(s *discordgo.Session, ic *discordgo.InteractionCreate) {
 		return
 	}
 
-	result, err := roomUC.Next(ic.GuildID, ic.ChannelID, settings, time.Now().UnixNano())
+	result, err := roomUC.Next(ic.GuildID, ic.ChannelID, settings)
 	if errors.Is(err, ErrNoPreviousMatch) {
 		editDeferredContent(s, ic, "先に /make を実行してください。")
 		return
@@ -916,11 +916,30 @@ func runMatchAndStore(guildID, channelID string, players []domain.Player, settin
 }
 
 func rerollFromLastSnapshot(guildID, channelID string, settings domain.RoomSettings, seed int64) (domain.MatchResult, error) {
-	return transientUC().Reroll(guildID, channelID, settings, seed)
+	state, ok := roomStore.GetState(guildID, channelID)
+	if !ok || len(state.LastPlayersSnapshot) == 0 {
+		return domain.MatchResult{}, ErrNoLastMake
+	}
+	return transientUC().RunMatchWithPlayers(guildID, channelID, state.LastPlayersSnapshot, settings, seed)
 }
 
 func nextMatchFromCurrentParticipants(guildID, channelID string, settings domain.RoomSettings, seed int64) (domain.MatchResult, error) {
-	return transientUC().Next(guildID, channelID, settings, seed)
+	state, ok := roomStore.GetState(guildID, channelID)
+	if !ok || len(state.LastResult.TeamA) == 0 || len(state.LastResult.TeamB) == 0 {
+		return domain.MatchResult{}, ErrNoPreviousMatch
+	}
+	roomStore.SnapshotRoomState(guildID, channelID)
+	defer roomStore.DecrementPauses(guildID, channelID)
+
+	players := roomStore.List(guildID, channelID)
+	active := make([]domain.Player, 0, len(players))
+	for _, p := range players {
+		if p.PauseRemaining > 0 {
+			continue
+		}
+		active = append(active, p)
+	}
+	return transientUC().RunMatchWithPlayers(guildID, channelID, active, settings, seed)
 }
 
 func undoLastRoomState(guildID, channelID string) (bool, error) {
