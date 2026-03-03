@@ -143,6 +143,7 @@ func (s *MemoryStore) SaveLastMatch(guildID, channelID string, seed int64, playe
 	key := roomKey(guildID, channelID)
 	state := s.rooms[key]
 	state.LastSeed = seed
+	state.LastResultAt = time.Now().Unix()
 	state.LastPlayersSnapshot = copyPlayers(players)
 	state.LastResult = copyResult(result)
 	if state.SpectatorHistory == nil {
@@ -218,6 +219,7 @@ func (s *MemoryStore) GetState(guildID, channelID string) (RoomState, bool) {
 		Players:             copyPlayers(state.Players),
 		LastResult:          copyResult(state.LastResult),
 		LastSeed:            state.LastSeed,
+		LastResultAt:        state.LastResultAt,
 		LastPlayersSnapshot: copyPlayers(state.LastPlayersSnapshot),
 		SpectatorHistory:    copySpectatorHistory(state.SpectatorHistory),
 		ParticipationCounts: copyParticipationCounts(state.ParticipationCounts),
@@ -235,6 +237,7 @@ func (s *MemoryStore) ReplaceState(guildID, channelID string, state RoomState) e
 		Players:             copyPlayers(state.Players),
 		LastResult:          copyResult(state.LastResult),
 		LastSeed:            state.LastSeed,
+		LastResultAt:        state.LastResultAt,
 		LastPlayersSnapshot: copyPlayers(state.LastPlayersSnapshot),
 		SpectatorHistory:    copySpectatorHistory(state.SpectatorHistory),
 		ParticipationCounts: copyParticipationCounts(state.ParticipationCounts),
@@ -433,6 +436,7 @@ func snapshotFromState(state RoomState) RoomStateSnapshot {
 		Players:             copyPlayers(state.Players),
 		LastResult:          copyResult(state.LastResult),
 		LastSeed:            state.LastSeed,
+		LastResultAt:        state.LastResultAt,
 		LastPlayersSnapshot: copyPlayers(state.LastPlayersSnapshot),
 		SpectatorHistory:    copySpectatorHistory(state.SpectatorHistory),
 		ParticipationCounts: copyParticipationCounts(state.ParticipationCounts),
@@ -445,6 +449,7 @@ func stateFromSnapshot(snapshot RoomStateSnapshot) RoomState {
 		Players:             copyPlayers(snapshot.Players),
 		LastResult:          copyResult(snapshot.LastResult),
 		LastSeed:            snapshot.LastSeed,
+		LastResultAt:        snapshot.LastResultAt,
 		LastPlayersSnapshot: copyPlayers(snapshot.LastPlayersSnapshot),
 		SpectatorHistory:    copySpectatorHistory(snapshot.SpectatorHistory),
 		ParticipationCounts: copyParticipationCounts(snapshot.ParticipationCounts),

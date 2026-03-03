@@ -285,6 +285,7 @@ func (s *SQLiteStore) SaveLastMatch(guildID, channelID string, seed int64, playe
 	}
 
 	state.LastSeed = seed
+	state.LastResultAt = time.Now().Unix()
 	state.LastPlayersSnapshot = copyPlayers(players)
 	state.LastResult = copyResult(result)
 	if state.SpectatorHistory == nil {
@@ -322,6 +323,7 @@ func (s *SQLiteStore) GetState(guildID, channelID string) (RoomState, bool) {
 		Players:             copyPlayers(state.Players),
 		LastResult:          copyResult(state.LastResult),
 		LastSeed:            state.LastSeed,
+		LastResultAt:        state.LastResultAt,
 		LastPlayersSnapshot: copyPlayers(state.LastPlayersSnapshot),
 		SpectatorHistory:    copySpectatorHistory(state.SpectatorHistory),
 		ParticipationCounts: copyParticipationCounts(state.ParticipationCounts),
@@ -444,16 +446,17 @@ func (s *SQLiteStore) getRoomStateLocked(guildID, channelID string) (RoomState, 
 	var lastResultJSON string
 	var lastSeed int64
 	var lastPlayersSnapshotJSON string
+	var lastResultAt int64
 	var spectatorHistoryJSON string
 	var participationCountsJSON string
 	var onboardingShown int
 	var previousStateJSON string
 
 	err := s.db.QueryRow(
-		`SELECT players_json, last_result_json, last_seed, last_players_snapshot_json, spectator_history_json, participation_counts_json, onboarding_shown, previous_state_json
+		`SELECT players_json, last_result_json, last_seed, last_result_at, last_players_snapshot_json, spectator_history_json, participation_counts_json, onboarding_shown, previous_state_json
 		 FROM room_states WHERE guild_id = ? AND channel_id = ?`,
 		guildID, channelID,
-	).Scan(&playersJSON, &lastResultJSON, &lastSeed, &lastPlayersSnapshotJSON, &spectatorHistoryJSON, &participationCountsJSON, &onboardingShown, &previousStateJSON)
+	).Scan(&playersJSON, &lastResultJSON, &lastSeed, &lastResultAt, &lastPlayersSnapshotJSON, &spectatorHistoryJSON, &participationCountsJSON, &onboardingShown, &previousStateJSON)
 	if errors.Is(err, sql.ErrNoRows) {
 		return RoomState{}, false, nil
 	}
@@ -485,6 +488,7 @@ func (s *SQLiteStore) getRoomStateLocked(guildID, channelID string) (RoomState, 
 		state.PreviousState = &prev
 	}
 	state.LastSeed = lastSeed
+	state.LastResultAt = lastResultAt
 	state.OnboardingShown = onboardingShown != 0
 
 	return state, true, nil
@@ -522,12 +526,13 @@ func (s *SQLiteStore) upsertStateLocked(guildID, channelID string, state RoomSta
 
 	_, err = s.db.Exec(
 		`INSERT INTO room_states
-		  (guild_id, channel_id, players_json, last_result_json, last_seed, last_players_snapshot_json, spectator_history_json, participation_counts_json, onboarding_shown, previous_state_json)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		  (guild_id, channel_id, players_json, last_result_json, last_seed, last_result_at, last_players_snapshot_json, spectator_history_json, participation_counts_json, onboarding_shown, previous_state_json)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		 ON CONFLICT(guild_id, channel_id) DO UPDATE SET
 		   players_json = excluded.players_json,
 		   last_result_json = excluded.last_result_json,
 		   last_seed = excluded.last_seed,
+		   last_result_at = excluded.last_result_at,
 		   last_players_snapshot_json = excluded.last_players_snapshot_json,
 		   spectator_history_json = excluded.spectator_history_json,
 		   participation_counts_json = excluded.participation_counts_json,
@@ -538,6 +543,7 @@ func (s *SQLiteStore) upsertStateLocked(guildID, channelID string, state RoomSta
 		string(playersJSON),
 		string(lastResultJSON),
 		state.LastSeed,
+		state.LastResultAt,
 		string(lastPlayersSnapshotJSON),
 		string(spectatorHistoryJSON),
 		string(participationCountsJSON),
@@ -912,6 +918,7 @@ func snapshotFromState(state RoomState) RoomStateSnapshot {
 		Players:             copyPlayers(state.Players),
 		LastResult:          copyResult(state.LastResult),
 		LastSeed:            state.LastSeed,
+		LastResultAt:        state.LastResultAt,
 		LastPlayersSnapshot: copyPlayers(state.LastPlayersSnapshot),
 		SpectatorHistory:    copySpectatorHistory(state.SpectatorHistory),
 		ParticipationCounts: copyParticipationCounts(state.ParticipationCounts),
@@ -924,6 +931,7 @@ func stateFromSnapshot(snapshot RoomStateSnapshot) RoomState {
 		Players:             copyPlayers(snapshot.Players),
 		LastResult:          copyResult(snapshot.LastResult),
 		LastSeed:            snapshot.LastSeed,
+		LastResultAt:        snapshot.LastResultAt,
 		LastPlayersSnapshot: copyPlayers(snapshot.LastPlayersSnapshot),
 		SpectatorHistory:    copySpectatorHistory(snapshot.SpectatorHistory),
 		ParticipationCounts: copyParticipationCounts(snapshot.ParticipationCounts),

@@ -6,6 +6,7 @@ type State struct {
 	Players             []domain.Player
 	LastResult          domain.MatchResult
 	LastSeed            int64
+	LastResultAt        int64
 	LastPlayersSnapshot []domain.Player
 	SpectatorHistory    map[string]SpectatorHistory
 	ParticipationCounts map[string]int
@@ -22,6 +23,7 @@ type Snapshot struct {
 	Players             []domain.Player             `json:"players"`
 	LastResult          domain.MatchResult          `json:"last_result"`
 	LastSeed            int64                       `json:"last_seed"`
+	LastResultAt        int64                       `json:"last_result_at"`
 	LastPlayersSnapshot []domain.Player             `json:"last_players_snapshot"`
 	SpectatorHistory    map[string]SpectatorHistory `json:"spectator_history"`
 	ParticipationCounts map[string]int              `json:"participation_counts"`

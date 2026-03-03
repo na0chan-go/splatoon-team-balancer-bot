@@ -268,6 +268,8 @@ docker run --rm \
 /help
 最短フローと運用例を表示（Embed）
 
+困ったときは `/diagnose`（管理者のみ）で room 状態とクールダウン/ロック状況を確認できます。
+
 /settings show
 このroomの運用設定を表示
 

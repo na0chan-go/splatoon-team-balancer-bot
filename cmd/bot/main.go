@@ -25,6 +25,7 @@ func main() {
 	}
 	defer persistentStore.Close()
 	bot.SetStore(persistentStore)
+	bot.SetSQLitePath(cfg.SQLitePath)
 
 	token := cfg.DiscordToken
 	if !strings.HasPrefix(token, "Bot ") {
