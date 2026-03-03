@@ -27,11 +27,20 @@ type RoomState struct {
 	LastSeed            int64
 	LastPlayersSnapshot []domain.Player
 	SpectatorHistory    map[string]SpectatorHistory
+	PreviousState       *RoomStateSnapshot
 }
 
 type SpectatorHistory struct {
 	SpectatorCount  int   `json:"spectator_count"`
 	LastSpectatedAt int64 `json:"last_spectated_at"`
+}
+
+type RoomStateSnapshot struct {
+	Players             []domain.Player             `json:"players"`
+	LastResult          domain.MatchResult          `json:"last_result"`
+	LastSeed            int64                       `json:"last_seed"`
+	LastPlayersSnapshot []domain.Player             `json:"last_players_snapshot"`
+	SpectatorHistory    map[string]SpectatorHistory `json:"spectator_history"`
 }
 
 type MemoryStore struct {
@@ -126,6 +135,34 @@ func (s *MemoryStore) SaveLastMatch(guildID, channelID string, seed int64, playe
 	s.rooms[key] = state
 }
 
+func (s *MemoryStore) SnapshotRoomState(guildID, channelID string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	key := roomKey(guildID, channelID)
+	state := s.rooms[key]
+	snap := snapshotFromState(state)
+	state.PreviousState = &snap
+	s.rooms[key] = state
+}
+
+func (s *MemoryStore) UndoRoomState(guildID, channelID string) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	key := roomKey(guildID, channelID)
+	state, ok := s.rooms[key]
+	if !ok || state.PreviousState == nil {
+		return false, nil
+	}
+
+	snapshot := *state.PreviousState
+	restored := stateFromSnapshot(snapshot)
+	restored.PreviousState = nil
+	s.rooms[key] = restored
+	return true, nil
+}
+
 func (s *MemoryStore) ResetRoom(guildID, channelID string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -149,6 +186,7 @@ func (s *MemoryStore) GetState(guildID, channelID string) (RoomState, bool) {
 		LastSeed:            state.LastSeed,
 		LastPlayersSnapshot: copyPlayers(state.LastPlayersSnapshot),
 		SpectatorHistory:    copySpectatorHistory(state.SpectatorHistory),
+		PreviousState:       copySnapshot(state.PreviousState),
 	}, true
 }
 
@@ -332,6 +370,34 @@ func copySpectatorHistory(in map[string]SpectatorHistory) map[string]SpectatorHi
 
 func roomKey(guildID, channelID string) string {
 	return guildID + ":" + channelID
+}
+
+func snapshotFromState(state RoomState) RoomStateSnapshot {
+	return RoomStateSnapshot{
+		Players:             copyPlayers(state.Players),
+		LastResult:          copyResult(state.LastResult),
+		LastSeed:            state.LastSeed,
+		LastPlayersSnapshot: copyPlayers(state.LastPlayersSnapshot),
+		SpectatorHistory:    copySpectatorHistory(state.SpectatorHistory),
+	}
+}
+
+func stateFromSnapshot(snapshot RoomStateSnapshot) RoomState {
+	return RoomState{
+		Players:             copyPlayers(snapshot.Players),
+		LastResult:          copyResult(snapshot.LastResult),
+		LastSeed:            snapshot.LastSeed,
+		LastPlayersSnapshot: copyPlayers(snapshot.LastPlayersSnapshot),
+		SpectatorHistory:    copySpectatorHistory(snapshot.SpectatorHistory),
+	}
+}
+
+func copySnapshot(in *RoomStateSnapshot) *RoomStateSnapshot {
+	if in == nil {
+		return nil
+	}
+	cp := snapshotFromState(stateFromSnapshot(*in))
+	return &cp
 }
 
 func clampRating(r int) int {

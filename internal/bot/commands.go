@@ -100,6 +100,10 @@ var commands = []*discordgo.ApplicationCommand{
 		Description: "show paused players in this room",
 	},
 	{
+		Name:        "undo",
+		Description: "undo last /make or /next result",
+	},
+	{
 		Name:        "reroll",
 		Description: "reroll teams using last /make participant snapshot",
 	},
@@ -158,6 +162,8 @@ func HandleInteraction(s *discordgo.Session, ic *discordgo.InteractionCreate) {
 		handleResume(s, ic)
 	case "paused":
 		handlePaused(s, ic)
+	case "undo":
+		handleUndo(s, ic)
 	case "reroll":
 		handleReroll(s, ic)
 	case "reset":
@@ -250,6 +256,7 @@ func handleMake(s *discordgo.Session, ic *discordgo.InteractionCreate) {
 	}
 
 	players := roomStore.List(ic.GuildID, ic.ChannelID)
+	roomStore.SnapshotRoomState(ic.GuildID, ic.ChannelID)
 	result, err := runMatchAndStore(ic.GuildID, ic.ChannelID, players, time.Now().UnixNano())
 	if errors.Is(err, domain.ErrNotEnoughPlayers) {
 		respond(s, ic, "参加者が8人未満のためチーム分けできません。", true)
@@ -422,6 +429,24 @@ func handleReset(s *discordgo.Session, ic *discordgo.InteractionCreate) {
 	respond(s, ic, "部屋の状態をリセットしました。", false)
 }
 
+func handleUndo(s *discordgo.Session, ic *discordgo.InteractionCreate) {
+	if ic.GuildID == "" {
+		respond(s, ic, "このコマンドはサーバー内で実行してください。", true)
+		return
+	}
+
+	ok, err := undoLastRoomState(ic.GuildID, ic.ChannelID)
+	if err != nil {
+		respond(s, ic, "undo に失敗しました。", true)
+		return
+	}
+	if !ok {
+		respond(s, ic, "戻せる直前状態がありません。", true)
+		return
+	}
+	respond(s, ic, "直前の状態に戻しました。", false)
+}
+
 func handleResult(s *discordgo.Session, ic *discordgo.InteractionCreate) {
 	if ic.GuildID == "" {
 		respond(s, ic, "このコマンドはサーバー内で実行してください。", true)
@@ -557,12 +582,12 @@ func rerollFromLastSnapshot(guildID, channelID string, seed int64) (domain.Match
 }
 
 func nextMatchFromCurrentParticipants(guildID, channelID string, seed int64) (domain.MatchResult, error) {
-	defer roomStore.DecrementPauses(guildID, channelID)
-
 	state, ok := roomStore.GetState(guildID, channelID)
 	if !ok || len(state.LastResult.TeamA) == 0 || len(state.LastResult.TeamB) == 0 {
 		return domain.MatchResult{}, ErrNoPreviousMatch
 	}
+	roomStore.SnapshotRoomState(guildID, channelID)
+	defer roomStore.DecrementPauses(guildID, channelID)
 
 	players := roomStore.List(guildID, channelID)
 	var active []domain.Player
@@ -573,6 +598,10 @@ func nextMatchFromCurrentParticipants(guildID, channelID string, seed int64) (do
 		active = append(active, p)
 	}
 	return runMatchAndStore(guildID, channelID, active, seed)
+}
+
+func undoLastRoomState(guildID, channelID string) (bool, error) {
+	return roomStore.UndoRoomState(guildID, channelID)
 }
 
 func hasResetPermission(ic *discordgo.InteractionCreate) bool {

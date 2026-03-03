@@ -180,3 +180,46 @@ func TestNextMatchSkipsPausedPlayersAndDecrementsOnSuccess(t *testing.T) {
 		}
 	}
 }
+
+func TestUndoLastRoomStateAfterNextRestoresPreviousState(t *testing.T) {
+	roomStore = store.NewMemoryStore()
+
+	players := make([]domain.Player, 0, 9)
+	for i := 1; i <= 9; i++ {
+		p := domain.Player{
+			ID:     fmt.Sprintf("u%d", i),
+			Name:   fmt.Sprintf("p%d", i),
+			XPower: 2200 + i*10,
+		}
+		players = append(players, p)
+		if _, err := roomStore.Join("g1", "c1", p); err != nil {
+			t.Fatalf("join failed: %v", err)
+		}
+	}
+
+	if _, err := runMatchAndStore("g1", "c1", players, 100); err != nil {
+		t.Fatalf("runMatchAndStore failed: %v", err)
+	}
+	makeState, _ := roomStore.GetState("g1", "c1")
+
+	if _, err := nextMatchFromCurrentParticipants("g1", "c1", 101); err != nil {
+		t.Fatalf("nextMatchFromCurrentParticipants failed: %v", err)
+	}
+	nextState, _ := roomStore.GetState("g1", "c1")
+	if nextState.LastSeed == makeState.LastSeed {
+		t.Fatal("expected next state to differ from make state before undo")
+	}
+
+	ok, err := undoLastRoomState("g1", "c1")
+	if err != nil {
+		t.Fatalf("undoLastRoomState failed: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected undoLastRoomState to restore previous state")
+	}
+
+	restored, _ := roomStore.GetState("g1", "c1")
+	if restored.LastSeed != makeState.LastSeed {
+		t.Fatalf("expected LastSeed restored to %d, got %d", makeState.LastSeed, restored.LastSeed)
+	}
+}

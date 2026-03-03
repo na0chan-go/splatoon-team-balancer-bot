@@ -182,3 +182,63 @@ func TestSQLiteStoreRecordMatchResultUpdatesStatsAndHistory(t *testing.T) {
 		t.Fatalf("expected 1 match record, got %d", matchCount)
 	}
 }
+
+func TestSQLiteStoreUndoRoomStatePersists(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+	s, err := NewSQLiteStore(dbPath)
+	if err != nil {
+		t.Fatalf("NewSQLiteStore failed: %v", err)
+	}
+
+	for i := 1; i <= 9; i++ {
+		_, err := s.Join("g1", "c1", domain.Player{
+			ID:     fmt.Sprintf("u%d", i),
+			Name:   fmt.Sprintf("p%d", i),
+			XPower: 2000 + i,
+		})
+		if err != nil {
+			t.Fatalf("join failed: %v", err)
+		}
+	}
+	base := s.List("g1", "c1")
+	s.SaveLastMatch("g1", "c1", 100, base, domain.MatchResult{
+		TeamA: base[:4], TeamB: base[4:8], Spectators: []domain.Player{base[8]},
+	})
+	s.SnapshotRoomState("g1", "c1")
+
+	if err := s.Leave("g1", "c1", "u9"); err != nil {
+		t.Fatalf("leave failed: %v", err)
+	}
+	after := s.List("g1", "c1")
+	s.SaveLastMatch("g1", "c1", 200, after, domain.MatchResult{
+		TeamA: after[:4], TeamB: after[4:8],
+	})
+
+	ok, err := s.UndoRoomState("g1", "c1")
+	if err != nil {
+		t.Fatalf("UndoRoomState failed: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected undo to restore previous state")
+	}
+	if err := s.Close(); err != nil {
+		t.Fatalf("close failed: %v", err)
+	}
+
+	s2, err := NewSQLiteStore(dbPath)
+	if err != nil {
+		t.Fatalf("reopen failed: %v", err)
+	}
+	defer s2.Close()
+
+	state, exists := s2.GetState("g1", "c1")
+	if !exists {
+		t.Fatal("expected state to exist")
+	}
+	if state.LastSeed != 100 {
+		t.Fatalf("expected LastSeed restored to 100, got %d", state.LastSeed)
+	}
+	if got := len(state.Players); got != 9 {
+		t.Fatalf("expected players restored to 9, got %d", got)
+	}
+}

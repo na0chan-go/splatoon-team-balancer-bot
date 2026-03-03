@@ -260,6 +260,7 @@ CREATE TABLE IF NOT EXISTS room_states (
   last_seed INTEGER NOT NULL,
   last_players_snapshot_json TEXT NOT NULL,
   spectator_history_json TEXT NOT NULL DEFAULT '{}',
+  previous_state_json TEXT NOT NULL DEFAULT '',
   PRIMARY KEY (guild_id, channel_id)
 );`
 
@@ -269,6 +270,10 @@ CREATE TABLE IF NOT EXISTS room_states (
 	_, err := s.db.Exec(`ALTER TABLE room_states ADD COLUMN spectator_history_json TEXT NOT NULL DEFAULT '{}'`)
 	if err != nil && !strings.Contains(strings.ToLower(err.Error()), "duplicate column name") {
 		return fmt.Errorf("failed to migrate sqlite schema: %w", err)
+	}
+	_, err = s.db.Exec(`ALTER TABLE room_states ADD COLUMN previous_state_json TEXT NOT NULL DEFAULT ''`)
+	if err != nil && !strings.Contains(strings.ToLower(err.Error()), "duplicate column name") {
+		return fmt.Errorf("failed to migrate sqlite schema for history: %w", err)
 	}
 
 	const playerStatsSchema = `
@@ -309,12 +314,13 @@ func (s *SQLiteStore) getRoomStateLocked(guildID, channelID string) (RoomState, 
 	var lastSeed int64
 	var lastPlayersSnapshotJSON string
 	var spectatorHistoryJSON string
+	var previousStateJSON string
 
 	err := s.db.QueryRow(
-		`SELECT players_json, last_result_json, last_seed, last_players_snapshot_json, spectator_history_json
+		`SELECT players_json, last_result_json, last_seed, last_players_snapshot_json, spectator_history_json, previous_state_json
 		 FROM room_states WHERE guild_id = ? AND channel_id = ?`,
 		guildID, channelID,
-	).Scan(&playersJSON, &lastResultJSON, &lastSeed, &lastPlayersSnapshotJSON, &spectatorHistoryJSON)
+	).Scan(&playersJSON, &lastResultJSON, &lastSeed, &lastPlayersSnapshotJSON, &spectatorHistoryJSON, &previousStateJSON)
 	if errors.Is(err, sql.ErrNoRows) {
 		return RoomState{}, false, nil
 	}
@@ -334,6 +340,13 @@ func (s *SQLiteStore) getRoomStateLocked(guildID, channelID string) (RoomState, 
 	}
 	if err := json.Unmarshal([]byte(spectatorHistoryJSON), &state.SpectatorHistory); err != nil {
 		return RoomState{}, false, fmt.Errorf("failed to unmarshal spectator history: %w", err)
+	}
+	if strings.TrimSpace(previousStateJSON) != "" {
+		var prev RoomStateSnapshot
+		if err := json.Unmarshal([]byte(previousStateJSON), &prev); err != nil {
+			return RoomState{}, false, fmt.Errorf("failed to unmarshal previous state: %w", err)
+		}
+		state.PreviousState = &prev
 	}
 	state.LastSeed = lastSeed
 
@@ -357,17 +370,26 @@ func (s *SQLiteStore) upsertStateLocked(guildID, channelID string, state RoomSta
 	if err != nil {
 		return fmt.Errorf("failed to marshal spectator history: %w", err)
 	}
+	previousStateJSON := ""
+	if state.PreviousState != nil {
+		prevJSON, err := json.Marshal(state.PreviousState)
+		if err != nil {
+			return fmt.Errorf("failed to marshal previous state: %w", err)
+		}
+		previousStateJSON = string(prevJSON)
+	}
 
 	_, err = s.db.Exec(
 		`INSERT INTO room_states
-		  (guild_id, channel_id, players_json, last_result_json, last_seed, last_players_snapshot_json, spectator_history_json)
-		 VALUES (?, ?, ?, ?, ?, ?, ?)
+		  (guild_id, channel_id, players_json, last_result_json, last_seed, last_players_snapshot_json, spectator_history_json, previous_state_json)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 		 ON CONFLICT(guild_id, channel_id) DO UPDATE SET
 		   players_json = excluded.players_json,
 		   last_result_json = excluded.last_result_json,
 		   last_seed = excluded.last_seed,
 		   last_players_snapshot_json = excluded.last_players_snapshot_json,
-		   spectator_history_json = excluded.spectator_history_json`,
+		   spectator_history_json = excluded.spectator_history_json,
+		   previous_state_json = excluded.previous_state_json`,
 		guildID,
 		channelID,
 		string(playersJSON),
@@ -375,6 +397,7 @@ func (s *SQLiteStore) upsertStateLocked(guildID, channelID string, state RoomSta
 		state.LastSeed,
 		string(lastPlayersSnapshotJSON),
 		string(spectatorHistoryJSON),
+		previousStateJSON,
 	)
 	if err != nil {
 		return err
@@ -389,6 +412,40 @@ func sortPlayers(players []domain.Player) {
 		}
 		return players[i].XPower > players[j].XPower
 	})
+}
+
+func (s *SQLiteStore) SnapshotRoomState(guildID, channelID string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	state, _, err := s.getRoomStateLocked(guildID, channelID)
+	if err != nil {
+		return
+	}
+	snap := snapshotFromState(state)
+	state.PreviousState = &snap
+	_ = s.upsertStateLocked(guildID, channelID, state)
+}
+
+func (s *SQLiteStore) UndoRoomState(guildID, channelID string) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	state, ok, err := s.getRoomStateLocked(guildID, channelID)
+	if err != nil {
+		return false, err
+	}
+	if !ok || state.PreviousState == nil {
+		return false, nil
+	}
+
+	prev := *state.PreviousState
+	restored := stateFromSnapshot(prev)
+	restored.PreviousState = nil
+	if err := s.upsertStateLocked(guildID, channelID, restored); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 func (s *SQLiteStore) GetPlayerStats(userIDs []string) map[string]PlayerStat {

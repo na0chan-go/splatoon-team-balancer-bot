@@ -14,6 +14,8 @@ type Store interface {
 	Leave(guildID, channelID, userID string) error
 	List(guildID, channelID string) []domain.Player
 	Paused(guildID, channelID string) []domain.Player
+	SnapshotRoomState(guildID, channelID string)
+	UndoRoomState(guildID, channelID string) (bool, error)
 	SaveLastMatch(guildID, channelID string, seed int64, players []domain.Player, result domain.MatchResult)
 	GetState(guildID, channelID string) (RoomState, bool)
 	ResetRoom(guildID, channelID string)

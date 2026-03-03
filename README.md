@@ -231,6 +231,9 @@ docker run --rm \
 /paused
 一時離脱中の一覧を表示
 
+/undo
+直前の /make または /next の状態に戻す
+
 /reroll
 別の最適解を再計算
 
