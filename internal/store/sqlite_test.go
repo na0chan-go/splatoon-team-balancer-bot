@@ -282,3 +282,38 @@ func TestSQLiteStoreTryMarkOnboardingShownPersists(t *testing.T) {
 		t.Fatal("expected onboarding flag to persist as true")
 	}
 }
+
+func TestSQLiteStoreRoomSettingsPersist(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+	s, err := NewSQLiteStore(dbPath)
+	if err != nil {
+		t.Fatalf("NewSQLiteStore failed: %v", err)
+	}
+
+	if err := s.SetRoomSetting("g1", "c1", "k1", "v1"); err != nil {
+		t.Fatalf("SetRoomSetting failed: %v", err)
+	}
+	if err := s.SetRoomSetting("g1", "c1", "k1", "v2"); err != nil {
+		t.Fatalf("SetRoomSetting update failed: %v", err)
+	}
+	if err := s.SetRoomSetting("g1", "c1", "k2", "v3"); err != nil {
+		t.Fatalf("SetRoomSetting second key failed: %v", err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatalf("close failed: %v", err)
+	}
+
+	s2, err := NewSQLiteStore(dbPath)
+	if err != nil {
+		t.Fatalf("reopen failed: %v", err)
+	}
+	defer s2.Close()
+
+	got, err := s2.GetRoomSettings("g1", "c1")
+	if err != nil {
+		t.Fatalf("GetRoomSettings failed: %v", err)
+	}
+	if got["k1"] != "v2" || got["k2"] != "v3" {
+		t.Fatalf("unexpected settings: %+v", got)
+	}
+}

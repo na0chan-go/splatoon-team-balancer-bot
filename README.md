@@ -222,6 +222,12 @@ docker run --rm \
 /help
 最短フローと運用例を表示（Embed）
 
+/settings show
+このroomの運用設定を表示
+
+/settings set key value
+このroomの運用設定を更新（管理者のみ）
+
 /make
 チーム分けを実行
 
@@ -266,6 +272,17 @@ docker run --rm \
 途中で戻る場合は `/resume` を実行してください。
 
 また、`/pause` 実行時にBotが投稿する案内メッセージへ対象ユーザーが 👍 リアクションすると、pauseを即時解除できます。
+
+---
+
+# Room設定（/settings）
+
+roomごとに以下を調整できます。
+
+- `make_next_cooldown_seconds`: `/make` と `/next` のクールダウン秒数
+- `spectator_rotation_weight`: 観戦ローテーションの重み
+- `same_team_avoidance_weight`: 同チーム回避の重み
+- `pause_default_matches`: `/pause` のデフォルト試合数
 
 ---
 

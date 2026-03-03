@@ -50,12 +50,14 @@ type RoomStateSnapshot struct {
 type MemoryStore struct {
 	mu          sync.RWMutex
 	rooms       map[string]RoomState
+	settings    map[string]map[string]string
 	playerStats map[string]PlayerStat
 }
 
 func NewMemoryStore() *MemoryStore {
 	return &MemoryStore{
 		rooms:       make(map[string]RoomState),
+		settings:    make(map[string]map[string]string),
 		playerStats: make(map[string]PlayerStat),
 	}
 }
@@ -131,6 +133,34 @@ func (s *MemoryStore) TryMarkOnboardingShown(guildID, channelID string) (bool, e
 	return true, nil
 }
 
+func (s *MemoryStore) GetRoomSettings(guildID, channelID string) (map[string]string, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	key := roomKey(guildID, channelID)
+	settings := s.settings[key]
+	if len(settings) == 0 {
+		return map[string]string{}, nil
+	}
+	out := make(map[string]string, len(settings))
+	for k, v := range settings {
+		out[k] = v
+	}
+	return out, nil
+}
+
+func (s *MemoryStore) SetRoomSetting(guildID, channelID, settingKey, value string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	key := roomKey(guildID, channelID)
+	if s.settings[key] == nil {
+		s.settings[key] = make(map[string]string)
+	}
+	s.settings[key][settingKey] = value
+	return nil
+}
+
 func (s *MemoryStore) SaveLastMatch(guildID, channelID string, seed int64, players []domain.Player, result domain.MatchResult) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -194,7 +224,9 @@ func (s *MemoryStore) ResetRoom(guildID, channelID string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	delete(s.rooms, roomKey(guildID, channelID))
+	key := roomKey(guildID, channelID)
+	delete(s.rooms, key)
+	delete(s.settings, key)
 }
 
 func (s *MemoryStore) GetState(guildID, channelID string) (RoomState, bool) {

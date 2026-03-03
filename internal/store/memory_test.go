@@ -277,3 +277,31 @@ func TestMemoryStoreTryMarkOnboardingShown(t *testing.T) {
 		t.Fatal("expected onboarding flag to be true")
 	}
 }
+
+func TestMemoryStoreRoomSettings(t *testing.T) {
+	s := NewMemoryStore()
+
+	if err := s.SetRoomSetting("g1", "c1", "k1", "v1"); err != nil {
+		t.Fatalf("SetRoomSetting failed: %v", err)
+	}
+	if err := s.SetRoomSetting("g1", "c1", "k2", "v2"); err != nil {
+		t.Fatalf("SetRoomSetting failed: %v", err)
+	}
+
+	got, err := s.GetRoomSettings("g1", "c1")
+	if err != nil {
+		t.Fatalf("GetRoomSettings failed: %v", err)
+	}
+	if got["k1"] != "v1" || got["k2"] != "v2" {
+		t.Fatalf("unexpected settings: %+v", got)
+	}
+
+	s.ResetRoom("g1", "c1")
+	got, err = s.GetRoomSettings("g1", "c1")
+	if err != nil {
+		t.Fatalf("GetRoomSettings after reset failed: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("expected settings cleared, got %+v", got)
+	}
+}

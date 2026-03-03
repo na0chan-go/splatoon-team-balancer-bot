@@ -13,7 +13,7 @@ import (
 func TestRerollFromLastSnapshotErrorsWithoutMake(t *testing.T) {
 	roomStore = store.NewMemoryStore()
 
-	_, err := rerollFromLastSnapshot("g1", "c1", 1)
+	_, err := rerollFromLastSnapshot("g1", "c1", domain.DefaultRoomSettings(), 1)
 	if !errors.Is(err, ErrNoLastMake) {
 		t.Fatalf("expected ErrNoLastMake, got %v", err)
 	}
@@ -33,7 +33,7 @@ func TestRunMatchAndStoreSavesStateForReroll(t *testing.T) {
 		{ID: "u9", Name: "p9", XPower: 2100},
 	}
 
-	if _, err := runMatchAndStore("g1", "c1", players, 100); err != nil {
+	if _, err := runMatchAndStore("g1", "c1", players, domain.DefaultRoomSettings(), 100); err != nil {
 		t.Fatalf("runMatchAndStore failed: %v", err)
 	}
 	state, ok := roomStore.GetState("g1", "c1")
@@ -47,7 +47,7 @@ func TestRunMatchAndStoreSavesStateForReroll(t *testing.T) {
 		t.Fatalf("expected LastPlayersSnapshot len=%d, got %d", want, got)
 	}
 
-	if _, err := rerollFromLastSnapshot("g1", "c1", 200); err != nil {
+	if _, err := rerollFromLastSnapshot("g1", "c1", domain.DefaultRoomSettings(), 200); err != nil {
 		t.Fatalf("rerollFromLastSnapshot failed: %v", err)
 	}
 	state, _ = roomStore.GetState("g1", "c1")
@@ -88,7 +88,7 @@ func TestHasResetPermission(t *testing.T) {
 func TestNextMatchFromCurrentParticipantsRequiresPreviousMake(t *testing.T) {
 	roomStore = store.NewMemoryStore()
 
-	_, err := nextMatchFromCurrentParticipants("g1", "c1", 1)
+	_, err := nextMatchFromCurrentParticipants("g1", "c1", domain.DefaultRoomSettings(), 1)
 	if !errors.Is(err, ErrNoPreviousMatch) {
 		t.Fatalf("expected ErrNoPreviousMatch, got %v", err)
 	}
@@ -110,7 +110,7 @@ func TestNextMatchFromCurrentParticipantsRequiresAtLeast8Players(t *testing.T) {
 		}
 	}
 
-	if _, err := runMatchAndStore("g1", "c1", players, 42); err != nil {
+	if _, err := runMatchAndStore("g1", "c1", players, domain.DefaultRoomSettings(), 42); err != nil {
 		t.Fatalf("runMatchAndStore failed: %v", err)
 	}
 	if err := roomStore.SetPause("g1", "c1", "u7", 1, "break"); err != nil {
@@ -121,7 +121,7 @@ func TestNextMatchFromCurrentParticipantsRequiresAtLeast8Players(t *testing.T) {
 		t.Fatalf("leave failed: %v", err)
 	}
 
-	_, err := nextMatchFromCurrentParticipants("g1", "c1", 43)
+	_, err := nextMatchFromCurrentParticipants("g1", "c1", domain.DefaultRoomSettings(), 43)
 	if !errors.Is(err, domain.ErrNotEnoughPlayers) {
 		t.Fatalf("expected ErrNotEnoughPlayers, got %v", err)
 	}
@@ -156,11 +156,11 @@ func TestNextMatchSkipsPausedPlayersAndDecrementsOnSuccess(t *testing.T) {
 		t.Fatalf("SetPause failed: %v", err)
 	}
 
-	if _, err := runMatchAndStore("g1", "c1", players, 100); err != nil {
+	if _, err := runMatchAndStore("g1", "c1", players, domain.DefaultRoomSettings(), 100); err != nil {
 		t.Fatalf("runMatchAndStore failed: %v", err)
 	}
 
-	got, err := nextMatchFromCurrentParticipants("g1", "c1", 101)
+	got, err := nextMatchFromCurrentParticipants("g1", "c1", domain.DefaultRoomSettings(), 101)
 	if err != nil {
 		t.Fatalf("nextMatchFromCurrentParticipants failed: %v", err)
 	}
@@ -197,12 +197,12 @@ func TestUndoLastRoomStateAfterNextRestoresPreviousState(t *testing.T) {
 		}
 	}
 
-	if _, err := runMatchAndStore("g1", "c1", players, 100); err != nil {
+	if _, err := runMatchAndStore("g1", "c1", players, domain.DefaultRoomSettings(), 100); err != nil {
 		t.Fatalf("runMatchAndStore failed: %v", err)
 	}
 	makeState, _ := roomStore.GetState("g1", "c1")
 
-	if _, err := nextMatchFromCurrentParticipants("g1", "c1", 101); err != nil {
+	if _, err := nextMatchFromCurrentParticipants("g1", "c1", domain.DefaultRoomSettings(), 101); err != nil {
 		t.Fatalf("nextMatchFromCurrentParticipants failed: %v", err)
 	}
 	nextState, _ := roomStore.GetState("g1", "c1")
@@ -308,5 +308,43 @@ func TestProcessPauseResumeReaction(t *testing.T) {
 		if p.ID == "u1" && p.PauseRemaining != 0 {
 			t.Fatalf("expected u1 pause remaining 0 after reaction resume, got %d", p.PauseRemaining)
 		}
+	}
+}
+
+func TestRoomSettingsUsesDefaultsAndOverrides(t *testing.T) {
+	roomStore = store.NewMemoryStore()
+
+	got, err := roomSettings("g1", "c1")
+	if err != nil {
+		t.Fatalf("roomSettings default failed: %v", err)
+	}
+	if got.MakeNextCooldownSeconds != domain.DefaultRoomSettings().MakeNextCooldownSeconds {
+		t.Fatalf("unexpected default cooldown: %+v", got)
+	}
+
+	if err := roomStore.SetRoomSetting("g1", "c1", domain.RoomSettingPauseDefaultMatches, "5"); err != nil {
+		t.Fatalf("SetRoomSetting failed: %v", err)
+	}
+	got, err = roomSettings("g1", "c1")
+	if err != nil {
+		t.Fatalf("roomSettings override failed: %v", err)
+	}
+	if got.PauseDefaultMatches != 5 {
+		t.Fatalf("expected pause default matches 5, got %d", got.PauseDefaultMatches)
+	}
+}
+
+func TestSameTeamPenaltyFunc(t *testing.T) {
+	last := domain.MatchResult{
+		TeamA: []domain.Player{{ID: "u1"}, {ID: "u2"}, {ID: "u3"}, {ID: "u4"}},
+		TeamB: []domain.Player{{ID: "u5"}, {ID: "u6"}, {ID: "u7"}, {ID: "u8"}},
+	}
+	penaltyFn := sameTeamPenaltyFunc(last)
+	next := domain.MatchResult{
+		TeamA: []domain.Player{{ID: "u1"}, {ID: "u2"}, {ID: "u5"}, {ID: "u6"}},
+		TeamB: []domain.Player{{ID: "u3"}, {ID: "u4"}, {ID: "u7"}, {ID: "u8"}},
+	}
+	if got := penaltyFn(next); got <= 0 {
+		t.Fatalf("expected positive same-team penalty, got %d", got)
 	}
 }

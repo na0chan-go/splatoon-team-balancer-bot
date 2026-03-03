@@ -130,6 +130,45 @@ func (s *SQLiteStore) TryMarkOnboardingShown(guildID, channelID string) (bool, e
 	return true, nil
 }
 
+func (s *SQLiteStore) GetRoomSettings(guildID, channelID string) (map[string]string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	rows, err := s.db.Query(
+		`SELECT key, value FROM room_settings WHERE guild_id = ? AND channel_id = ?`,
+		guildID, channelID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	settings := make(map[string]string)
+	for rows.Next() {
+		var key string
+		var value string
+		if err := rows.Scan(&key, &value); err != nil {
+			return nil, err
+		}
+		settings[key] = value
+	}
+	return settings, nil
+}
+
+func (s *SQLiteStore) SetRoomSetting(guildID, channelID, key, value string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	_, err := s.db.Exec(
+		`INSERT INTO room_settings (guild_id, channel_id, key, value)
+		 VALUES (?, ?, ?, ?)
+		 ON CONFLICT(guild_id, channel_id, key) DO UPDATE SET
+		   value = excluded.value`,
+		guildID, channelID, key, value,
+	)
+	return err
+}
+
 func (s *SQLiteStore) List(guildID, channelID string) []domain.Player {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -277,6 +316,10 @@ func (s *SQLiteStore) ResetRoom(guildID, channelID string) {
 		`DELETE FROM room_states WHERE guild_id = ? AND channel_id = ?`,
 		guildID, channelID,
 	)
+	_, _ = s.db.Exec(
+		`DELETE FROM room_settings WHERE guild_id = ? AND channel_id = ?`,
+		guildID, channelID,
+	)
 }
 
 func (s *SQLiteStore) init() error {
@@ -342,6 +385,18 @@ CREATE TABLE IF NOT EXISTS matches (
 );`
 	if _, err := s.db.Exec(matchesSchema); err != nil {
 		return fmt.Errorf("failed to initialize matches schema: %w", err)
+	}
+
+	const roomSettingsSchema = `
+CREATE TABLE IF NOT EXISTS room_settings (
+  guild_id TEXT NOT NULL,
+  channel_id TEXT NOT NULL,
+  key TEXT NOT NULL,
+  value TEXT NOT NULL,
+  PRIMARY KEY (guild_id, channel_id, key)
+);`
+	if _, err := s.db.Exec(roomSettingsSchema); err != nil {
+		return fmt.Errorf("failed to initialize room_settings schema: %w", err)
 	}
 
 	return nil

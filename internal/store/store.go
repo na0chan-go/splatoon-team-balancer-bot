@@ -12,6 +12,8 @@ type PlayerStat struct {
 type Store interface {
 	Join(guildID, channelID string, player domain.Player) (bool, error)
 	TryMarkOnboardingShown(guildID, channelID string) (bool, error)
+	GetRoomSettings(guildID, channelID string) (map[string]string, error)
+	SetRoomSetting(guildID, channelID, key, value string) error
 	Leave(guildID, channelID, userID string) error
 	List(guildID, channelID string) []domain.Player
 	Paused(guildID, channelID string) []domain.Player

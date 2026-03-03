@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -23,7 +24,6 @@ var ErrNoPreviousMatch = errors.New("no previous match")
 var ErrNotInRoom = errors.New("player not in room")
 
 const rotationDiffSlack = 50
-const makeNextCooldown = 3 * time.Second
 
 func SetStore(s store.Store) {
 	if s == nil {
@@ -141,6 +141,42 @@ var commands = []*discordgo.ApplicationCommand{
 			},
 		},
 	},
+	{
+		Name:        "settings",
+		Description: "show or update room settings",
+		Options: []*discordgo.ApplicationCommandOption{
+			{
+				Type:        discordgo.ApplicationCommandOptionSubCommand,
+				Name:        "show",
+				Description: "show room settings",
+			},
+			{
+				Type:        discordgo.ApplicationCommandOptionSubCommand,
+				Name:        "set",
+				Description: "set room setting (admin only)",
+				Options: []*discordgo.ApplicationCommandOption{
+					{
+						Type:        discordgo.ApplicationCommandOptionString,
+						Name:        "key",
+						Description: "setting key",
+						Required:    true,
+						Choices: []*discordgo.ApplicationCommandOptionChoice{
+							{Name: domain.RoomSettingMakeNextCooldownSeconds, Value: domain.RoomSettingMakeNextCooldownSeconds},
+							{Name: domain.RoomSettingSpectatorRotationWeight, Value: domain.RoomSettingSpectatorRotationWeight},
+							{Name: domain.RoomSettingSameTeamAvoidanceWeight, Value: domain.RoomSettingSameTeamAvoidanceWeight},
+							{Name: domain.RoomSettingPauseDefaultMatches, Value: domain.RoomSettingPauseDefaultMatches},
+						},
+					},
+					{
+						Type:        discordgo.ApplicationCommandOptionString,
+						Name:        "value",
+						Description: "setting value",
+						Required:    true,
+					},
+				},
+			},
+		},
+	},
 }
 
 func RegisterCommands(s *discordgo.Session, appID, guildID string) error {
@@ -192,6 +228,8 @@ func HandleInteraction(s *discordgo.Session, ic *discordgo.InteractionCreate) {
 		handleReset(s, ic)
 	case "result":
 		handleResult(s, ic)
+	case "settings":
+		handleSettings(s, ic)
 	}
 }
 
@@ -294,7 +332,12 @@ func handleMake(s *discordgo.Session, ic *discordgo.InteractionCreate) {
 		return
 	}
 	defer lock.mu.Unlock()
-	if !checkAndConsumeMakeNextCooldown(s, ic, lock) {
+	settings, err := roomSettings(ic.GuildID, ic.ChannelID)
+	if err != nil {
+		respond(s, ic, "settings の読み込みに失敗しました。", true)
+		return
+	}
+	if !checkAndConsumeMakeNextCooldown(s, ic, lock, settings.MakeNextCooldownSeconds) {
 		return
 	}
 	if !deferAck(s, ic) {
@@ -303,7 +346,7 @@ func handleMake(s *discordgo.Session, ic *discordgo.InteractionCreate) {
 
 	players := roomStore.List(ic.GuildID, ic.ChannelID)
 	roomStore.SnapshotRoomState(ic.GuildID, ic.ChannelID)
-	result, err := runMatchAndStore(ic.GuildID, ic.ChannelID, players, time.Now().UnixNano())
+	result, err := runMatchAndStore(ic.GuildID, ic.ChannelID, players, settings, time.Now().UnixNano())
 	if errors.Is(err, domain.ErrNotEnoughPlayers) {
 		editDeferredContent(s, ic, "参加者が8人未満のためチーム分けできません。")
 		return
@@ -327,7 +370,12 @@ func handleReroll(s *discordgo.Session, ic *discordgo.InteractionCreate) {
 	}
 	defer lock.mu.Unlock()
 
-	result, err := rerollFromLastSnapshot(ic.GuildID, ic.ChannelID, time.Now().UnixNano())
+	settings, err := roomSettings(ic.GuildID, ic.ChannelID)
+	if err != nil {
+		respond(s, ic, "settings の読み込みに失敗しました。", true)
+		return
+	}
+	result, err := rerollFromLastSnapshot(ic.GuildID, ic.ChannelID, settings, time.Now().UnixNano())
 	if errors.Is(err, ErrNoLastMake) {
 		respond(s, ic, "先に /make を実行してください。", true)
 		return
@@ -350,14 +398,19 @@ func handleNext(s *discordgo.Session, ic *discordgo.InteractionCreate) {
 		return
 	}
 	defer lock.mu.Unlock()
-	if !checkAndConsumeMakeNextCooldown(s, ic, lock) {
+	settings, err := roomSettings(ic.GuildID, ic.ChannelID)
+	if err != nil {
+		respond(s, ic, "settings の読み込みに失敗しました。", true)
+		return
+	}
+	if !checkAndConsumeMakeNextCooldown(s, ic, lock, settings.MakeNextCooldownSeconds) {
 		return
 	}
 	if !deferAck(s, ic) {
 		return
 	}
 
-	result, err := nextMatchFromCurrentParticipants(ic.GuildID, ic.ChannelID, time.Now().UnixNano())
+	result, err := nextMatchFromCurrentParticipants(ic.GuildID, ic.ChannelID, settings, time.Now().UnixNano())
 	if errors.Is(err, ErrNoPreviousMatch) {
 		editDeferredContent(s, ic, "先に /make を実行してください。")
 		return
@@ -385,6 +438,12 @@ func handlePause(s *discordgo.Session, ic *discordgo.InteractionCreate) {
 	}
 	defer lock.mu.Unlock()
 
+	settings, err := roomSettings(ic.GuildID, ic.ChannelID)
+	if err != nil {
+		respond(s, ic, "settings の読み込みに失敗しました。", true)
+		return
+	}
+
 	targetID := ""
 	targetName := ""
 	if u, ok := userOption(s, ic.ApplicationCommandData().Options, "user"); ok && u != nil {
@@ -400,7 +459,7 @@ func handlePause(s *discordgo.Session, ic *discordgo.InteractionCreate) {
 		targetName = displayName(ic)
 	}
 
-	matches := 3
+	matches := settings.PauseDefaultMatches
 	if v, ok := intOption(ic.ApplicationCommandData().Options, "matches"); ok {
 		matches = v
 	}
@@ -595,6 +654,61 @@ func handleResult(s *discordgo.Session, ic *discordgo.InteractionCreate) {
 	respond(s, ic, fmt.Sprintf("試合結果を記録しました。勝利: %s", winner), false)
 }
 
+func handleSettings(s *discordgo.Session, ic *discordgo.InteractionCreate) {
+	if ic.GuildID == "" {
+		respond(s, ic, "このコマンドはサーバー内で実行してください。", true)
+		return
+	}
+	opts := ic.ApplicationCommandData().Options
+	if len(opts) == 0 {
+		respond(s, ic, "使い方: /settings show または /settings set key value", true)
+		return
+	}
+
+	sub := opts[0]
+	switch sub.Name {
+	case "show":
+		cfg, err := roomSettings(ic.GuildID, ic.ChannelID)
+		if err != nil {
+			respond(s, ic, "settings の読み込みに失敗しました。", true)
+			return
+		}
+		respondEmbed(s, ic, util.SettingsEmbed(roomSettingsToMap(cfg)), false)
+	case "set":
+		if !hasResetPermission(ic) {
+			respond(s, ic, "権限がありません", true)
+			return
+		}
+		lock, ok := lockRoomMutation(s, ic)
+		if !ok {
+			return
+		}
+		defer lock.mu.Unlock()
+
+		key, ok := stringOption(sub.Options, "key")
+		if !ok {
+			respond(s, ic, "key の取得に失敗しました。", true)
+			return
+		}
+		value, ok := stringOption(sub.Options, "value")
+		if !ok {
+			respond(s, ic, "value の取得に失敗しました。", true)
+			return
+		}
+		if err := domain.ValidateRoomSetting(key, value); err != nil {
+			respond(s, ic, "不正な設定です: "+err.Error(), true)
+			return
+		}
+		if err := roomStore.SetRoomSetting(ic.GuildID, ic.ChannelID, key, value); err != nil {
+			respond(s, ic, "settings の保存に失敗しました。", true)
+			return
+		}
+		respond(s, ic, fmt.Sprintf("設定を更新しました: %s=%s", key, value), false)
+	default:
+		respond(s, ic, "使い方: /settings show または /settings set key value", true)
+	}
+}
+
 func lockRoomMutation(s *discordgo.Session, ic *discordgo.InteractionCreate) (*roomCommandGuardState, bool) {
 	state, ok := roomCommandGuards.tryLock(roomKey(ic.GuildID, ic.ChannelID))
 	if ok {
@@ -604,8 +718,9 @@ func lockRoomMutation(s *discordgo.Session, ic *discordgo.InteractionCreate) (*r
 	return nil, false
 }
 
-func checkAndConsumeMakeNextCooldown(s *discordgo.Session, ic *discordgo.InteractionCreate, state *roomCommandGuardState) bool {
-	remaining, ok := consumeCooldown(&state.makeNextCooldown, time.Now(), makeNextCooldown)
+func checkAndConsumeMakeNextCooldown(s *discordgo.Session, ic *discordgo.InteractionCreate, state *roomCommandGuardState, cooldownSeconds int) bool {
+	cooldown := time.Duration(cooldownSeconds) * time.Second
+	remaining, ok := consumeCooldown(&state.makeNextCooldown, time.Now(), cooldown)
 	if ok {
 		return true
 	}
@@ -719,12 +834,12 @@ func displayName(ic *discordgo.InteractionCreate) string {
 	return "unknown"
 }
 
-func runMatchAndStore(guildID, channelID string, players []domain.Player, seed int64) (domain.MatchResult, error) {
+func runMatchAndStore(guildID, channelID string, players []domain.Player, settings domain.RoomSettings, seed int64) (domain.MatchResult, error) {
 	state, _ := roomStore.GetState(guildID, channelID)
-	penaltyFn := spectatorPenaltyFunc(state.SpectatorHistory, time.Now().Unix())
+	penaltyFn := combinedPenaltyFunc(state, settings, time.Now().Unix())
 	effectivePlayers := applyRatings(players, roomStore.GetPlayerStats(playerIDs(players)))
 
-	result, err := domain.BuildMatchWithSpectatorPenalty(effectivePlayers, seed, rotationDiffSlack, penaltyFn)
+	result, err := domain.BuildMatchWithResultPenalty(effectivePlayers, seed, rotationDiffSlack, penaltyFn)
 	if err != nil {
 		return domain.MatchResult{}, err
 	}
@@ -732,15 +847,15 @@ func runMatchAndStore(guildID, channelID string, players []domain.Player, seed i
 	return result, nil
 }
 
-func rerollFromLastSnapshot(guildID, channelID string, seed int64) (domain.MatchResult, error) {
+func rerollFromLastSnapshot(guildID, channelID string, settings domain.RoomSettings, seed int64) (domain.MatchResult, error) {
 	state, ok := roomStore.GetState(guildID, channelID)
 	if !ok || len(state.LastPlayersSnapshot) == 0 {
 		return domain.MatchResult{}, ErrNoLastMake
 	}
-	return runMatchAndStore(guildID, channelID, state.LastPlayersSnapshot, seed)
+	return runMatchAndStore(guildID, channelID, state.LastPlayersSnapshot, settings, seed)
 }
 
-func nextMatchFromCurrentParticipants(guildID, channelID string, seed int64) (domain.MatchResult, error) {
+func nextMatchFromCurrentParticipants(guildID, channelID string, settings domain.RoomSettings, seed int64) (domain.MatchResult, error) {
 	state, ok := roomStore.GetState(guildID, channelID)
 	if !ok || len(state.LastResult.TeamA) == 0 || len(state.LastResult.TeamB) == 0 {
 		return domain.MatchResult{}, ErrNoPreviousMatch
@@ -756,7 +871,7 @@ func nextMatchFromCurrentParticipants(guildID, channelID string, seed int64) (do
 		}
 		active = append(active, p)
 	}
-	return runMatchAndStore(guildID, channelID, active, seed)
+	return runMatchAndStore(guildID, channelID, active, settings, seed)
 }
 
 func undoLastRoomState(guildID, channelID string) (bool, error) {
@@ -933,6 +1048,38 @@ func hasResetPermission(ic *discordgo.InteractionCreate) bool {
 	return perms&discordgo.PermissionAdministrator != 0 || perms&discordgo.PermissionManageGuild != 0
 }
 
+func roomSettings(guildID, channelID string) (domain.RoomSettings, error) {
+	raw, err := roomStore.GetRoomSettings(guildID, channelID)
+	if err != nil {
+		return domain.RoomSettings{}, err
+	}
+	return domain.RoomSettingsFromMap(raw), nil
+}
+
+func roomSettingsToMap(s domain.RoomSettings) map[string]string {
+	return map[string]string{
+		domain.RoomSettingMakeNextCooldownSeconds: strconv.Itoa(s.MakeNextCooldownSeconds),
+		domain.RoomSettingSpectatorRotationWeight: strconv.Itoa(s.SpectatorRotationWeight),
+		domain.RoomSettingSameTeamAvoidanceWeight: strconv.Itoa(s.SameTeamAvoidanceWeight),
+		domain.RoomSettingPauseDefaultMatches:     strconv.Itoa(s.PauseDefaultMatches),
+	}
+}
+
+func combinedPenaltyFunc(state store.RoomState, settings domain.RoomSettings, nowUnix int64) func(domain.MatchResult) int {
+	spectatorPenalty := spectatorPenaltyFunc(state.SpectatorHistory, nowUnix)
+	sameTeamPenalty := sameTeamPenaltyFunc(state.LastResult)
+	return func(result domain.MatchResult) int {
+		total := 0
+		if settings.SpectatorRotationWeight > 0 {
+			total += spectatorPenalty(result.Spectators) * settings.SpectatorRotationWeight
+		}
+		if settings.SameTeamAvoidanceWeight > 0 {
+			total += sameTeamPenalty(result) * settings.SameTeamAvoidanceWeight
+		}
+		return total
+	}
+}
+
 func spectatorPenaltyFunc(history map[string]store.SpectatorHistory, nowUnix int64) func([]domain.Player) int {
 	return func(spectators []domain.Player) int {
 		if len(history) == 0 || len(spectators) == 0 {
@@ -960,6 +1107,45 @@ func spectatorPenaltyFunc(history map[string]store.SpectatorHistory, nowUnix int
 		}
 		return penalty
 	}
+}
+
+func sameTeamPenaltyFunc(last domain.MatchResult) func(domain.MatchResult) int {
+	if len(last.TeamA) == 0 || len(last.TeamB) == 0 {
+		return func(domain.MatchResult) int { return 0 }
+	}
+	lastPairs := teammatePairs(last.TeamA)
+	for k := range teammatePairs(last.TeamB) {
+		lastPairs[k] = struct{}{}
+	}
+	return func(result domain.MatchResult) int {
+		penalty := 0
+		for k := range teammatePairs(result.TeamA) {
+			if _, ok := lastPairs[k]; ok {
+				penalty++
+			}
+		}
+		for k := range teammatePairs(result.TeamB) {
+			if _, ok := lastPairs[k]; ok {
+				penalty++
+			}
+		}
+		return penalty
+	}
+}
+
+func teammatePairs(team []domain.Player) map[string]struct{} {
+	pairs := make(map[string]struct{})
+	for i := 0; i < len(team); i++ {
+		for j := i + 1; j < len(team); j++ {
+			a := team[i].ID
+			b := team[j].ID
+			if a > b {
+				a, b = b, a
+			}
+			pairs[a+":"+b] = struct{}{}
+		}
+	}
+	return pairs
 }
 
 func playerIDs(players []domain.Player) []string {

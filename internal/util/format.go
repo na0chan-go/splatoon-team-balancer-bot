@@ -91,6 +91,22 @@ func OnboardingEmbed() *discordgo.MessageEmbed {
 	}
 }
 
+func SettingsEmbed(settings map[string]string) *discordgo.MessageEmbed {
+	var b strings.Builder
+	for _, key := range []string{
+		domain.RoomSettingMakeNextCooldownSeconds,
+		domain.RoomSettingSpectatorRotationWeight,
+		domain.RoomSettingSameTeamAvoidanceWeight,
+		domain.RoomSettingPauseDefaultMatches,
+	} {
+		fmt.Fprintf(&b, "- `%s`: `%s`\n", key, settings[key])
+	}
+	return &discordgo.MessageEmbed{
+		Title:       "Room Settings",
+		Description: strings.TrimSpace(b.String()),
+	}
+}
+
 func formatPlayers(players []domain.Player) string {
 	if len(players) == 0 {
 		return "- none"
