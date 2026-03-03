@@ -136,7 +136,7 @@ internal/domain/room/
 RoomStateなどドメイン状態
 
 internal/store/
-状態管理（メモリ / DB）
+状態管理のinterface/メモリ実装
 
 internal/util/
 補助関数

@@ -13,7 +13,26 @@ import (
 	"time"
 
 	"github.com/na0chan-go/splatoon-team-balancer-bot/internal/domain"
+	corestore "github.com/na0chan-go/splatoon-team-balancer-bot/internal/store"
 	_ "modernc.org/sqlite"
+)
+
+type RoomState = corestore.RoomState
+type SpectatorHistory = corestore.SpectatorHistory
+type RoomStateSnapshot = corestore.RoomStateSnapshot
+type PlayerStat = corestore.PlayerStat
+type MatchRecord = corestore.MatchRecord
+
+var (
+	ErrRoomFull      = corestore.ErrRoomFull
+	ErrNotJoined     = corestore.ErrNotJoined
+	ErrInvalidXPower = corestore.ErrInvalidXPower
+)
+
+const (
+	maxPlayers = 10
+	minXPower  = 0
+	maxXPower  = 5000
 )
 
 type SQLiteStore struct {
@@ -843,4 +862,70 @@ func boolToInt(v bool) int {
 		return 1
 	}
 	return 0
+}
+
+func copyPlayers(players []domain.Player) []domain.Player {
+	if len(players) == 0 {
+		return nil
+	}
+	cp := make([]domain.Player, len(players))
+	copy(cp, players)
+	return cp
+}
+
+func copyResult(result domain.MatchResult) domain.MatchResult {
+	return domain.MatchResult{
+		TeamA:      copyPlayers(result.TeamA),
+		TeamB:      copyPlayers(result.TeamB),
+		Spectators: copyPlayers(result.Spectators),
+		SumA:       result.SumA,
+		SumB:       result.SumB,
+		Diff:       result.Diff,
+	}
+}
+
+func copySpectatorHistory(in map[string]SpectatorHistory) map[string]SpectatorHistory {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string]SpectatorHistory, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
+}
+
+func copyParticipationCounts(in map[string]int) map[string]int {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string]int, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
+}
+
+func snapshotFromState(state RoomState) RoomStateSnapshot {
+	return RoomStateSnapshot{
+		Players:             copyPlayers(state.Players),
+		LastResult:          copyResult(state.LastResult),
+		LastSeed:            state.LastSeed,
+		LastPlayersSnapshot: copyPlayers(state.LastPlayersSnapshot),
+		SpectatorHistory:    copySpectatorHistory(state.SpectatorHistory),
+		ParticipationCounts: copyParticipationCounts(state.ParticipationCounts),
+		OnboardingShown:     state.OnboardingShown,
+	}
+}
+
+func stateFromSnapshot(snapshot RoomStateSnapshot) RoomState {
+	return RoomState{
+		Players:             copyPlayers(snapshot.Players),
+		LastResult:          copyResult(snapshot.LastResult),
+		LastSeed:            snapshot.LastSeed,
+		LastPlayersSnapshot: copyPlayers(snapshot.LastPlayersSnapshot),
+		SpectatorHistory:    copySpectatorHistory(snapshot.SpectatorHistory),
+		ParticipationCounts: copyParticipationCounts(snapshot.ParticipationCounts),
+		OnboardingShown:     snapshot.OnboardingShown,
+	}
 }
